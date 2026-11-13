@@ -238,7 +238,7 @@ def parse_markdown(source: str, style: str = "職務経歴書") -> ParsedDocumen
             if style == "職務経歴書" and not list_stack and (
                 _SECTION.match(text) or (typ == "heading_open" and int(tok.tag[1:]) == 1)
             ):
-                in_work_history = bool(re.fullmatch(r"(?:■\\s*)?職務経歴", text))
+                in_work_history = bool(re.fullmatch(r"(?:■\s*)?職務経歴", text))
             if text in reserved and typ == "paragraph_open":
                 blocks.append(reserved[text])
             elif list_stack:
