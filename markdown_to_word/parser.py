@@ -141,10 +141,10 @@ def _reserved_resume_tables(source: str) -> tuple[str, dict[str, Block]]:
             j = next_index + 1
         count = len(group) - int(header)
         if count < 2:
-            # A generic tabular header such as 項目<TAB>内容 is not a
-            # company table unless the subsequent rows contain company keys.
-            first = _generic_tab_row(line) if is_header and i not in protected else None
-            if first is not None and not (j > i + 1 and group[1][0] in _KV_KEYS):
+            # A partly recognized company/skill table can still be an explicit
+            # tabular block; fall back to generic rows when it is too short.
+            first = _generic_tab_row(line) if i not in protected else None
+            if first is not None:
                 generic_rows: list[tuple[str, ...]] = [first]
                 next_line = i + 1
                 while next_line < len(lines) and next_line not in protected:
@@ -158,7 +158,7 @@ def _reserved_resume_tables(source: str) -> tuple[str, dict[str, Block]]:
                     while marker in source:
                         marker += "X"
                     rows = tuple(tuple((Span(cell),) for cell in row) for row in generic_rows)
-                    tables[marker] = Block(kind="table", rows=rows, header=True, table_type="standard")
+                    tables[marker] = Block(kind="table", rows=rows, header=is_header, table_type="standard")
                     out.extend(("", marker, ""))
                     i = next_line
                     continue
@@ -333,7 +333,10 @@ def parse_markdown(source: str, style: str = "職務経歴書") -> ParsedDocumen
         raise ConversionError("変換できる本文がありません。")
     if style == "職務経歴書" and blocks[-1].kind == "paragraph" and _plain(blocks[-1].spans).strip() == "以上":
         blocks[-1] = Block("meta_end", blocks[-1].spans)
-    if any(child.type == "image" for token in tokens for child in (token.children or [])):
+    # Reserved table rows are replaced by sentinels, so inspect original
+    # Markdown tokens to detect images inside converted tab-separated cells.
+    image_tokens = md.parse(source) if preprocessed != source else tokens
+    if any(child.type == "image" for token in image_tokens for child in (token.children or [])):
         warnings.append("画像は埋め込まず、Markdown記法の文字列として保持します。")
     # The public counter tracks visible content characters; never count markup.
     char_count = sum(len(s.text) for b in blocks for s in b.spans)
