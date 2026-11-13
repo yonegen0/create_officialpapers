@@ -118,10 +118,10 @@ def test_pipe_tables_use_resume_col_widths():
 
 def test_images_and_resume_ending_and_role_period():
     image = '![会社ロゴ](images/logo.png "企業ロゴ")'
-    d = parse_markdown("■ 職務経歴\\n\\n一般事務・受付（2023年10月～現在）\\n\\n" + image + "\\n\\n以上")
+    d = parse_markdown("■ 職務経歴\n\n一般事務・受付（2023年10月～現在）\n\n" + image + "\n\n以上")
     assert d.blocks[1].kind == "heading" and d.blocks[1].level == 2
     assert any(image in plain(b) for b in d.blocks)
     assert d.blocks[-1].kind == "meta_end"
     assert any("画像" in w for w in d.warnings)
-    assert parse_markdown("以上\\n\\n説明").blocks[0].kind == "paragraph"
+    assert parse_markdown("以上\n\n説明").blocks[0].kind == "paragraph"
     assert parse_markdown("以上", "標準文書").blocks[0].kind == "paragraph"
