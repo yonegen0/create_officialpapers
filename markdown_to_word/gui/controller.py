@@ -97,7 +97,7 @@ class Controller:
                 raise ConversionError("ファイル名にフォルダー区切り文字を使用しないでください。")
             replace = False
             if path.exists():
-                choice = dialogs.conflict(self.view.root, path.name)
+                choice = dialogs.conflict(self.view.root, path)
                 if choice == "cancel":
                     self.view.set_status("保存をキャンセルしました")
                     return
@@ -141,14 +141,20 @@ class Controller:
     def open_word(self) -> None:
         if self.last_output and self.last_output.exists():
             if os.name == "nt":
-                os.startfile(self.last_output)  # type: ignore[attr-defined]
+                try:
+                    os.startfile(self.last_output)  # type: ignore[attr-defined]
+                except OSError as exc:
+                    dialogs.error("Wordを開けませんでした", str(exc), self.view.root)
             else:
                 dialogs.info("Windows専用", "Windowsでは関連付けられたアプリで開きます。", self.view.root)
 
     def open_folder(self) -> None:
         if self.last_output and self.last_output.parent.is_dir():
             if os.name == "nt":
-                os.startfile(self.last_output.parent)  # type: ignore[attr-defined]
+                try:
+                    os.startfile(self.last_output.parent)  # type: ignore[attr-defined]
+                except OSError as exc:
+                    dialogs.error("保存先を開けませんでした", str(exc), self.view.root)
             else:
                 dialogs.info("Windows専用", str(self.last_output.parent), self.view.root)
 
