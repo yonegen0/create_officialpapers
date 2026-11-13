@@ -16,11 +16,12 @@ class Span:
 
 @dataclass(frozen=True)
 class Block:
-    kind: Literal["paragraph", "heading", "meta_title", "meta_date", "meta_name", "table", "list", "rule", "code"]
+    kind: Literal["paragraph", "heading", "meta_title", "meta_date", "meta_name", "table", "list", "rule", "code", "meta_end"]
     spans: tuple[Span, ...] = ()
     level: int = 0
     ordered: bool = False
     start: int = 1
+    list_id: int = 0
     rows: tuple[tuple[tuple[Span, ...], ...], ...] = ()
     header: bool = False
     table_type: str = "standard"
