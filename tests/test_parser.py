@@ -55,10 +55,14 @@ def test_tabs_and_skill_table():
     assert len(table.rows) == 3
 
 
-def test_unrelated_tabs_are_not_assumed_table():
+def test_generic_tabs_and_non_table_text():
     d = parse_markdown("受付\t予約調整\n営業\t調整", "職務経歴書")
-    assert d.tables == 0
-    assert "受付" in "".join(plain(b) for b in d.blocks)
+    assert d.tables == 1 and len(d.blocks[0].rows) == 2
+    assert d.blocks[0].rows[0][0][0].text == "受付"
+    bad = parse_markdown("単独\t行\n\n文章\n\n- 箇条\t項目\n- 箇条\t項目\n\n> 引用\t値\n> 引用\t値\n\n```\nA\tB\nC\tD\n```")
+    assert bad.tables == 0
+    assert parse_markdown("A\tB\nC\tD\tE").tables == 0
+    assert parse_markdown("A  B\nC  D").tables == 0
 
 
 def test_style_separation_and_metadata_scope():
@@ -110,3 +114,14 @@ def test_pipe_tables_use_resume_col_widths():
     assert company.blocks[0].table_type == "company"
     skills = parse_markdown("|経験・能力|内容|\n|---|---|\n|Word|文章作成|")
     assert skills.blocks[0].table_type == "skill"
+
+
+def test_images_and_resume_ending_and_role_period():
+    image = '![会社ロゴ](images/logo.png "企業ロゴ")'
+    d = parse_markdown("■ 職務経歴\\n\\n一般事務・受付（2023年10月～現在）\\n\\n" + image + "\\n\\n以上")
+    assert d.blocks[1].kind == "heading" and d.blocks[1].level == 2
+    assert any(image in plain(b) for b in d.blocks)
+    assert d.blocks[-1].kind == "meta_end"
+    assert any("画像" in w for w in d.warnings)
+    assert parse_markdown("以上\\n\\n説明").blocks[0].kind == "paragraph"
+    assert parse_markdown("以上", "標準文書").blocks[0].kind == "paragraph"
