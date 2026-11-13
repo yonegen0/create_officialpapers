@@ -68,7 +68,6 @@ def test_open_failures_keep_generated_document(tmp_path, monkeypatch):
         output.write_bytes(b"existing")
         view.controller.last_output = output
         errors = []
-        monkeypatch.setattr(controller.os, "name", "nt")
         monkeypatch.setattr(controller.os, "startfile", lambda _: (_ for _ in ()).throw(OSError("起動できません")), raising=False)
         monkeypatch.setattr(dialogs, "error", lambda title, message, parent: errors.append(title))
         view.controller.open_word()
