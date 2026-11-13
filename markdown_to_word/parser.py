@@ -141,6 +141,27 @@ def _reserved_resume_tables(source: str) -> tuple[str, dict[str, Block]]:
             j = next_index + 1
         count = len(group) - int(header)
         if count < 2:
+            # A generic tabular header such as 項目<TAB>内容 is not a
+            # company table unless the subsequent rows contain company keys.
+            first = _generic_tab_row(line) if is_header and i not in protected else None
+            if first is not None and not (j > i + 1 and group[1][0] in _KV_KEYS):
+                generic_rows: list[tuple[str, ...]] = [first]
+                next_line = i + 1
+                while next_line < len(lines) and next_line not in protected:
+                    row = _generic_tab_row(lines[next_line])
+                    if row is None or len(row) != len(first):
+                        break
+                    generic_rows.append(row)
+                    next_line += 1
+                if len(generic_rows) >= 2:
+                    marker = f"MTW_RESUME_TABLE_MARKER_{len(tables)}_END"
+                    while marker in source:
+                        marker += "X"
+                    rows = tuple(tuple((Span(cell),) for cell in row) for row in generic_rows)
+                    tables[marker] = Block(kind="table", rows=rows, header=True, table_type="standard")
+                    out.extend(("", marker, ""))
+                    i = next_line
+                    continue
             out.append(line)
             i += 1
             continue
