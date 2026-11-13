@@ -58,3 +58,22 @@ def test_gui_preview_generate_busy_and_success(tmp_path):
         assert "完了" in view.status.get()
     finally:
         view.controller.close()
+
+
+def test_open_failures_keep_generated_document(tmp_path, monkeypatch):
+    root, view = _window()
+    try:
+        from markdown_to_word.gui import controller, dialogs
+        output = tmp_path / "既存.docx"
+        output.write_bytes(b"existing")
+        view.controller.last_output = output
+        errors = []
+        monkeypatch.setattr(controller.os, "name", "nt")
+        monkeypatch.setattr(controller.os, "startfile", lambda _: (_ for _ in ()).throw(OSError("起動できません")), raising=False)
+        monkeypatch.setattr(dialogs, "error", lambda title, message, parent: errors.append(title))
+        view.controller.open_word()
+        view.controller.open_folder()
+        assert len(errors) == 2
+        assert output.read_bytes() == b"existing"
+    finally:
+        view.controller.close()
