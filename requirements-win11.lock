@@ -1,0 +1,5 @@
+# Python 3.13 / Windows 11 x64. Runtime packages only.
+python-docx==1.2.0
+lxml==6.1.1
+markdown-it-py==4.2.0
+mdurl==0.1.2

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=80,<82"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "markdown-to-word"
+version = "0.1.0"
+description = "完全ローカルのMarkdown→Word変換Windowsアプリ"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "python-docx==1.2.0",
+    "markdown-it-py==4.2.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+
+[tool.setuptools.packages.find]
+include = ["markdown_to_word*"]
+
+[tool.setuptools.package-data]
+markdown_to_word = ["assets/*.ico"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

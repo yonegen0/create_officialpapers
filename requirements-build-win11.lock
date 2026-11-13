@@ -1,0 +1,5 @@
+-r requirements-win11.lock
+# Match the proven build-tool versions used by job_comparison.
+pyinstaller==6.22.2
+pytest==8.3.5
+setuptools==80.9.0
