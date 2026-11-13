@@ -12,6 +12,8 @@ from markdown_it.token import Token
 from .errors import ConversionError
 from .models import Block, ParsedDocument, Span
 
+_ROLE_PERIOD = re.compile(r"^[^（）\n]{2,40}（\d{4}年\d{1,2}月\s*[～〜－-]\s*(?:現在|\d{4}年\d{1,2}月)）$")
+
 _SECTION = re.compile(r"^■\s*\S")
 _CIRCLED = re.compile(r"^[①-⑳]\s*\S")
 _BRACKET = re.compile(r"^【[^】]+】$")
@@ -32,6 +34,29 @@ def _separated(line: str) -> tuple[str, str] | None:
     return parts[0].strip(), parts[1].strip()
 
 
+def _generic_tab_row(line: str) -> tuple[str, ...] | None:
+    """Only explicit, nonindented tab-separated rows can become generic tables."""
+    if "\t" not in line or line.startswith((" ", "\t")):
+        return None
+    cells = tuple(part.strip() for part in line.split("\t"))
+    if len(cells) < 2 or any(not cell for cell in cells):
+        return None
+    return cells
+
+
+def _protected_markdown_lines(source: str) -> set[int]:
+    """Avoid interpreting Markdown block structures as generic tabular data."""
+    md = MarkdownIt("commonmark", {"html": False}).enable("table")
+    protected: set[int] = set()
+    for token in md.parse(source):
+        if token.map and token.type in (
+            "blockquote_open", "bullet_list_open", "ordered_list_open",
+            "fence", "code_block", "html_block", "heading_open", "table_open",
+        ):
+            protected.update(range(*token.map))
+    return protected
+
+
 def _reserved_resume_tables(source: str) -> tuple[str, dict[str, Block]]:
     """Replace only recognized, contiguous two-column data with opaque sentinels.
 
@@ -39,6 +64,7 @@ def _reserved_resume_tables(source: str) -> tuple[str, dict[str, Block]]:
     re-interpretation of unrelated text as tables.
     """
     lines = source.split("\n")
+    protected = _protected_markdown_lines(source)
     out: list[str] = []
     tables: dict[str, Block] = {}
     i = 0
@@ -63,6 +89,25 @@ def _reserved_resume_tables(source: str) -> tuple[str, dict[str, Block]]:
         is_header = pair in _HEADER_KEYS if pair else False
         is_company = bool(pair and pair[0] in _KV_KEYS)
         if not (is_header or is_company):
+            first = _generic_tab_row(line) if i not in protected else None
+            if first is not None:
+                group_rows: list[tuple[str, ...]] = [first]
+                j = i + 1
+                while j < len(lines) and j not in protected:
+                    row = _generic_tab_row(lines[j])
+                    if row is None or len(row) != len(first):
+                        break
+                    group_rows.append(row)
+                    j += 1
+                if len(group_rows) >= 2:
+                    marker = f"MTW_RESUME_TABLE_MARKER_{len(tables)}_END"
+                    while marker in source:
+                        marker += "X"
+                    rows = tuple(tuple((Span(cell),) for cell in row) for row in group_rows)
+                    tables[marker] = Block(kind="table", rows=rows, table_type="standard")
+                    out.extend(("", marker, ""))
+                    i = j
+                    continue
             out.append(line)
             i += 1
             continue
@@ -96,6 +141,27 @@ def _reserved_resume_tables(source: str) -> tuple[str, dict[str, Block]]:
             j = next_index + 1
         count = len(group) - int(header)
         if count < 2:
+            # A generic tabular header such as 項目<TAB>内容 is not a
+            # company table unless the subsequent rows contain company keys.
+            first = _generic_tab_row(line) if is_header and i not in protected else None
+            if first is not None and not (j > i + 1 and group[1][0] in _KV_KEYS):
+                generic_rows: list[tuple[str, ...]] = [first]
+                next_line = i + 1
+                while next_line < len(lines) and next_line not in protected:
+                    row = _generic_tab_row(lines[next_line])
+                    if row is None or len(row) != len(first):
+                        break
+                    generic_rows.append(row)
+                    next_line += 1
+                if len(generic_rows) >= 2:
+                    marker = f"MTW_RESUME_TABLE_MARKER_{len(tables)}_END"
+                    while marker in source:
+                        marker += "X"
+                    rows = tuple(tuple((Span(cell),) for cell in row) for row in generic_rows)
+                    tables[marker] = Block(kind="table", rows=rows, header=True, table_type="standard")
+                    out.extend(("", marker, ""))
+                    i = next_line
+                    continue
             out.append(line)
             i += 1
             continue
@@ -132,7 +198,12 @@ def _inline(children: Sequence[Token] | None) -> tuple[Span, ...]:
             # Preserve intentional line boundaries, including soft breaks.
             result.append(Span("\n", break_line=True))
         elif typ == "image":
-            result.append(Span(token.content, strong, italic, link))
+            # Embedded images are intentionally unsupported; preserve the visible
+            # Markdown reference rather than silently dropping its path/title.
+            target = token.attrGet("src") or ""
+            title = token.attrGet("title")
+            suffix = (' "' + title.replace('"', '\\"') + '"') if title is not None else ""
+            result.append(Span(f"![{token.content}]({target}{suffix})", strong, italic))
         elif typ in ("text", "code_inline", "html_inline"):
             result.append(Span(token.content, strong, italic, link, typ == "code_inline"))
         elif token.content:
@@ -162,13 +233,16 @@ def parse_markdown(source: str, style: str = "職務経歴書") -> ParsedDocumen
         leftover = [_separated(line) for line in preprocessed.splitlines()]
         if any(item and (item[0] in _KV_KEYS or item in _HEADER_KEYS) for item in leftover):
             warnings.append("一部の2列データを表と判定できませんでした。原文のまま保持します。")
-    list_stack: list[tuple[bool, int]] = []
+    list_stack: list[tuple[bool, int, int]] = []
+    next_list_id = 0
+    in_work_history = False
     i = 0
     while i < len(tokens):
         tok = tokens[i]
         typ = tok.type
         if typ in ("bullet_list_open", "ordered_list_open"):
-            list_stack.append((typ == "ordered_list_open", int(tok.attrGet("start") or "1")))
+            next_list_id += 1
+            list_stack.append((typ == "ordered_list_open", int(tok.attrGet("start") or "1"), next_list_id))
             i += 1
             continue
         if typ in ("bullet_list_close", "ordered_list_close"):
@@ -182,11 +256,16 @@ def parse_markdown(source: str, style: str = "職務経歴書") -> ParsedDocumen
             inline = tokens[i + 1] if i + 1 < len(tokens) else None
             spans = _inline(inline.children if inline and inline.type == "inline" else None)
             text = _plain(spans).strip()
+            if style == "職務経歴書" and not list_stack and (
+                _SECTION.match(text) or (typ == "heading_open" and int(tok.tag[1:]) == 1)
+            ):
+                in_work_history = bool(re.fullmatch(r"(?:■\s*)?職務経歴", text))
             if text in reserved and typ == "paragraph_open":
                 blocks.append(reserved[text])
             elif list_stack:
-                ordered, start = list_stack[-1]
-                blocks.append(Block("list", spans, level=min(len(list_stack), 3), ordered=ordered, start=start))
+                ordered, start, list_id = list_stack[-1]
+                blocks.append(Block("list", spans, level=min(len(list_stack), 3),
+                                    ordered=ordered, start=start, list_id=list_id))
             elif typ == "heading_open":
                 level = min(int(tok.tag[1:]), 3)
                 if style == "職務経歴書" and text == "職務経歴書" and not blocks:
@@ -199,6 +278,8 @@ def parse_markdown(source: str, style: str = "職務経歴書") -> ParsedDocumen
             elif style == "職務経歴書" and _SECTION.match(text) and "\n" not in text:
                 blocks.append(Block("heading", spans, level=1))
             elif style == "職務経歴書" and (_CIRCLED.match(text) or _BRACKET.match(text)) and "\n" not in text:
+                blocks.append(Block("heading", spans, level=2))
+            elif style == "職務経歴書" and in_work_history and _ROLE_PERIOD.fullmatch(text) and "\n" not in text:
                 blocks.append(Block("heading", spans, level=2))
             elif style == "職務経歴書" and text == "職務経歴書" and not blocks:
                 blocks.append(Block("meta_title", spans))
@@ -250,6 +331,10 @@ def parse_markdown(source: str, style: str = "職務経歴書") -> ParsedDocumen
         i += 1
     if not blocks:
         raise ConversionError("変換できる本文がありません。")
+    if style == "職務経歴書" and blocks[-1].kind == "paragraph" and _plain(blocks[-1].spans).strip() == "以上":
+        blocks[-1] = Block("meta_end", blocks[-1].spans)
+    if any(child.type == "image" for token in tokens for child in (token.children or [])):
+        warnings.append("画像は埋め込まず、Markdown記法の文字列として保持します。")
     # The public counter tracks visible content characters; never count markup.
     char_count = sum(len(s.text) for b in blocks for s in b.spans)
     char_count += sum(len(s.text) for b in blocks for row in b.rows for cell in row for s in cell)

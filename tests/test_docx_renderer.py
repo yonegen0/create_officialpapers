@@ -31,3 +31,27 @@ def test_long_body_does_not_force_page_breaks():
 def test_hyperlinks_remain_clickable():
     doc = render_docx(parse_markdown("[会社サイト](https://example.com)", "標準文書"))
     assert 'w:hyperlink' in doc.paragraphs[0]._p.xml
+
+
+def test_numbering_start_and_independence():
+    src = "3. 一つ\n4. 二つ\n\n通常の文章\n\n1. 別リスト\n2. 別の項目"
+    parsed = parse_markdown(src, "標準文書")
+    lists = [x for x in parsed.blocks if x.kind == "list"]
+    assert [x.start for x in lists] == [3, 3, 1, 1]
+    assert lists[0].list_id == lists[1].list_id != lists[2].list_id
+    doc = render_docx(parsed)
+    numbered = [p for p in doc.paragraphs if p.style.name.startswith("List Number")]
+    ids = [int(p._p.pPr.numPr.numId.val) for p in numbered]
+    assert ids[0] == ids[1] and ids[2] == ids[3] and ids[0] != ids[2]
+    numbering = doc.part.numbering_part.element
+    for number_id, start in ((ids[0], 3), (ids[2], 1)):
+        item = next(n for n in numbering.findall(qn("w:num")) if int(n.get(qn("w:numId"))) == number_id)
+        assert item.find(qn("w:lvlOverride")).find(qn("w:startOverride")).get(qn("w:val")) == str(start)
+
+
+def test_resume_end_alignment_and_tabular_docx():
+    parsed = parse_markdown("■ 職務経歴\n\n一般事務・受付（2023年10月～現在）\n\n項目\t内容\n電話\t来客対応\n\n以上")
+    doc = render_docx(parsed)
+    assert doc.tables[0].cell(1, 1).text == "来客対応"
+    assert doc.paragraphs[-1].alignment == WD_ALIGN_PARAGRAPH.RIGHT
+    assert any(p.text == "一般事務・受付（2023年10月～現在）" and p.style.name == "Heading 2" for p in doc.paragraphs)

@@ -1,0 +1,35 @@
+name: Windows ZIP distribution
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          architecture: 'x64'
+      - name: Build onedir ZIP
+        shell: cmd
+        run: build_release.bat
+      - name: Validate ZIP content and extraction
+        shell: pwsh
+        run: |
+          $zip = 'release/MarkdownToWord-0.1.0-win-x64.zip'
+          if (!(Test-Path $zip)) { throw 'ZIP missing' }
+          $folder = Join-Path $env:RUNNER_TEMP 'markdown-to-word-unpacked'
+          Expand-Archive -Path $zip -DestinationPath $folder -Force
+          if (!(Test-Path (Join-Path $folder 'MarkdownToWord/MarkdownToWord.exe'))) { throw 'EXE missing after unzip' }
+          if (!(Test-Path (Join-Path $folder 'MarkdownToWord/_internal'))) { throw 'onedir dependencies missing' }
+      - name: Upload downloadable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: MarkdownToWord-0.1.0-win-x64
+          path: release/MarkdownToWord-0.1.0-win-x64.zip
+          if-no-files-found: error
+          retention-days: 30
