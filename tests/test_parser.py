@@ -128,25 +128,25 @@ def test_images_and_resume_ending_and_role_period():
 
 
 def test_partially_recognized_company_rows_become_generic_table():
-    source = "勤務先\\t架空会社\\n担当業務\\t受付・予約管理"
+    source = "勤務先\t架空会社\n担当業務\t受付・予約管理"
     parsed = parse_markdown(source)
     assert parsed.tables == 1
     assert parsed.blocks[0].table_type == "standard"
     assert [row[0][0].text for row in parsed.blocks[0].rows] == ["勤務先", "担当業務"]
-    headed = parse_markdown("項目\\t内容\\n" + source)
+    headed = parse_markdown("項目\t内容\n" + source)
     assert headed.tables == 1 and headed.blocks[0].header
     assert len(headed.blocks[0].rows) == 3
-    company = parse_markdown("勤務先\\t架空会社\\n在籍期間\\t2023年～現在")
+    company = parse_markdown("勤務先\t架空会社\n在籍期間\t2023年～現在")
     assert company.blocks[0].table_type == "company"
     assert parse_markdown(source, "標準文書").tables == 0
 
 
 def test_tabular_image_reference_is_preserved_and_warned():
     image = '![会社ロゴ](images/logo.png "企業ロゴ")'
-    parsed = parse_markdown("項目\\t内容\\nロゴ\\t" + image)
+    parsed = parse_markdown("項目\t内容\nロゴ\t" + image)
     assert parsed.tables == 1
     assert parsed.blocks[0].rows[1][1][0].text == image
     assert any("画像" in warning for warning in parsed.warnings)
-    code = parse_markdown("項目\\t内容\\nコード\\t" + "`![ロゴ](logo.png)`")
+    code = parse_markdown("項目\t内容\nコード\t" + "`![ロゴ](logo.png)`")
     assert code.tables == 1
     assert not any("画像" in warning for warning in code.warnings)
