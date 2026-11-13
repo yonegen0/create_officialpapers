@@ -234,9 +234,35 @@ def _rule(p) -> None:
     ppr.append(borders)
 
 
+def _ordered_numbering(doc, style_name: str, start: int) -> int:
+    """Create a separate Word numbering instance for one Markdown list."""
+    style = doc.styles[style_name]
+    num_pr = style.element.pPr.numPr
+    base_id = int(num_pr.numId.val)
+    numbering = doc.part.numbering_part.element
+    base_num = next(n for n in numbering.findall(qn("w:num"))
+                    if int(n.get(qn("w:numId"))) == base_id)
+    abstract_id = int(base_num.find(qn("w:abstractNumId")).get(qn("w:val")))
+    num_id = max((int(n.get(qn("w:numId"))) for n in numbering.findall(qn("w:num"))), default=0) + 1
+    num = OxmlElement("w:num")
+    num.set(qn("w:numId"), str(num_id))
+    abstract = OxmlElement("w:abstractNumId")
+    abstract.set(qn("w:val"), str(abstract_id))
+    num.append(abstract)
+    override = OxmlElement("w:lvlOverride")
+    override.set(qn("w:ilvl"), "0")
+    start_override = OxmlElement("w:startOverride")
+    start_override.set(qn("w:val"), str(start))
+    override.append(start_override)
+    num.append(override)
+    numbering.append(num)
+    return num_id
+
+
 def render_docx(parsed: ParsedDocument) -> Document:
     doc = Document()
     _setup(doc)
+    list_numbers: dict[int, int] = {}
     for b in parsed.blocks:
         if b.kind == "table":
             _draw_table(doc, b)
@@ -256,8 +282,16 @@ def render_docx(parsed: ParsedDocument) -> Document:
             if n > 1:
                 name += f" {n}"
             p = doc.add_paragraph(style=name)
+            if b.ordered:
+                if b.list_id not in list_numbers:
+                    list_numbers[b.list_id] = _ordered_numbering(doc, name, b.start)
+                num_pr = p._p.get_or_add_pPr().get_or_add_numPr()
+                num_pr.get_or_add_ilvl().val = 0
+                num_pr.get_or_add_numId().val = list_numbers[b.list_id]
         else:
             p = doc.add_paragraph()
+        if b.kind == "meta_end":
+            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
         if b.kind == "rule":
             _rule(p)
         else:
