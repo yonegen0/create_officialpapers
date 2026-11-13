@@ -50,7 +50,7 @@ def test_numbering_start_and_independence():
 
 
 def test_resume_end_alignment_and_tabular_docx():
-    parsed = parse_markdown("■ 職務経歴\n\n一般事務・受付（2023年10月～現在）\n\n項目\\t内容\n電話\\t来客対応\n\n以上")
+    parsed = parse_markdown("■ 職務経歴\n\n一般事務・受付（2023年10月～現在）\n\n項目\t内容\n電話\t来客対応\n\n以上")
     doc = render_docx(parsed)
     assert doc.tables[0].cell(1, 1).text == "来客対応"
     assert doc.paragraphs[-1].alignment == WD_ALIGN_PARAGRAPH.RIGHT
