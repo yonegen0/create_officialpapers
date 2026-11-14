@@ -349,7 +349,7 @@ def _draw_block(doc, paragraphs, tables, block: Block, list_ids, *, tasks=False)
         "meta_title": "TITLE", "meta_date": "DATE", "meta_name": "NAME",
         "meta_end": "END", "heading": "HEADING" + str(min(block.level, 3)),
     }
-    key = keys.get(block.kind, "BODY")
+    key = "BODY" if _in_tasks_heading(block) else keys.get(block.kind, "BODY")
     spans = block.spans
     if block.kind == "list" and tasks and not block.ordered:
         raw = _text(spans)
