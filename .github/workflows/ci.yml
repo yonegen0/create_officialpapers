@@ -20,3 +20,7 @@ jobs:
         run: python -m compileall -q markdown_to_word
       - name: Unit tests
         run: python -m pytest -q
+
+      - name: Export visual fixture (temporary verification)
+        run: |
+          python -c 'import base64,zlib; from pathlib import Path; from markdown_to_word.parser import parse_markdown; from markdown_to_word.docx_renderer import render_docx; source=Path("docs/サンプル_架空.md").read_text(encoding="utf-8"); doc=render_docx(parse_markdown(source)); print("MTW_VISUAL_XML="+base64.b64encode(zlib.compress(doc._element.xml.encode("utf-8"))).decode("ascii"))'
