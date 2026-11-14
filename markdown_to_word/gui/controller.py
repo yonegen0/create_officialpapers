@@ -255,7 +255,7 @@ class Controller:
             self.view.set_status("Wordの生成が完了しました")
 
     def open_word(self) -> None:
-        if self.last_result_kind != "single":
+        if self.last_result_kind == "batch":
             return
         if self.last_output and self.last_output.exists():
             if os.name == "nt":
