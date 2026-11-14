@@ -734,7 +734,8 @@ def _draw_general_table(doc, block: Block) -> None:
 
 def _draw_block(doc, paragraphs, tables, block: Block, list_ids, *, tasks=False,
                 first_line_indent: float | None = None,
-                episode_link_next: bool = False):
+                episode_link_next: bool = False,
+                episode_heading: bool = False):
     if block.kind == "table":
         if block.table_type == "company":
             _draw_company(doc, tables, block)
@@ -786,6 +787,12 @@ def _draw_block(doc, paragraphs, tables, block: Block, list_ids, *, tasks=False,
         p.paragraph_format.keep_together = False
         p.paragraph_format.page_break_before = False
         p.paragraph_format.widow_control = False
+    elif episode_heading:
+        # Suppress Word's editing-margin square only for circled experience
+        # headings. Do not change other headings or their inherited typography.
+        p.paragraph_format.keep_with_next = False
+        p.paragraph_format.keep_together = False
+        p.paragraph_format.page_break_before = False
     elif block.kind == "heading" or _in_tasks_heading(block):
         p.paragraph_format.keep_with_next = True
     if block.kind in ("meta_date", "meta_name", "meta_end"):
@@ -878,6 +885,7 @@ def render_resume(parsed: ParsedDocument):
     i = 0
     while i < len(blocks):
         block = blocks[i]
+        episode_heading = False
         if block.kind == "heading" and block.level == 1:
             section = _text(block.spans).strip().removeprefix("■").strip()
             in_history = section == "職務経歴"
@@ -887,7 +895,8 @@ def render_resume(parsed: ParsedDocument):
             episode_paragraph_count = 0
         elif (section == "主な経験・強み" and block.kind == "heading"
               and block.level >= 2):
-            episode_active = bool(_CIRCLED_PREFIX.match(_text(block.spans).strip()))
+            episode_heading = bool(_CIRCLED_PREFIX.match(_text(block.spans).strip()))
+            episode_active = episode_heading
             episode_paragraph_count = 0
         if in_history and block.kind == "table" and block.table_type == "company":
             _draw_company(doc, tables, block)
@@ -925,8 +934,11 @@ def render_resume(parsed: ParsedDocument):
                                 for value in (intro, continuation))
                     )
                 episode_paragraph_count += 1
+            elif section == "自己PR":
+                indent = 10.5
         _draw_block(doc, paragraphs, tables, block, list_ids, tasks=tasks,
-                    first_line_indent=indent, episode_link_next=link_episode_intro)
+                    first_line_indent=indent, episode_link_next=link_episode_intro,
+                    episode_heading=episode_heading)
         i += 1
     _format_page_fields(doc)
     return doc
