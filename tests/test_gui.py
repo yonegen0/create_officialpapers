@@ -76,3 +76,57 @@ def test_open_failures_keep_generated_document(tmp_path, monkeypatch):
         assert output.read_bytes() == b"existing"
     finally:
         view.controller.close()
+
+
+def test_preview_metrics_invalidate_without_losing_last_output(tmp_path):
+    root, view = _window()
+    try:
+        view.input_mode.set("paste")
+        view.input_text.insert("1.0", "# 見出し\n\n本文")
+        root.update()
+        view.controller.confirm()
+        assert view.metric_values["headings"].get() == "1"
+        assert view.metric_values["characters"].get() != "—"
+        previous = tmp_path / "前回.docx"
+        previous.write_bytes(b"previous")
+        view.controller.last_output = previous
+        view.show_success(previous)
+
+        view.input_text.insert("end-1c", "\n追加")
+        root.update()
+        assert view.controller.preview is None
+        assert all(metric.get() == "—" for metric in view.metric_values.values())
+        assert "前回生成したWordファイル" in view.success.get()
+        assert view.controller.last_output == previous
+
+        view.controller.confirm()
+        assert view.controller.preview is not None
+        view.output_name.set("別名.docx")
+        view.output_dir.set(str(tmp_path))
+        assert view.controller.preview is not None
+    finally:
+        view.controller.close()
+
+
+def test_busy_disables_editing_and_output_actions(tmp_path):
+    root, view = _window()
+    try:
+        path = tmp_path / "前回.docx"
+        path.write_bytes(b"previous")
+        view.controller.last_output = path
+        view.show_success(path)
+
+        view.set_busy(True)
+        assert str(view.name_entry.cget("state")) == "disabled"
+        assert str(view.dir_entry.cget("state")) == "disabled"
+        assert str(view.input_text.cget("state")) == "disabled"
+        assert str(view.open_button.cget("state")) == "disabled"
+        assert str(view.open_folder_button.cget("state")) == "disabled"
+        assert "前回生成したWordファイル" in view.success.get()
+
+        view.set_busy(False)
+        assert str(view.input_text.cget("state")) == "normal"
+        assert str(view.style_combo.cget("state")) == "readonly"
+        assert str(view.open_button.cget("state")) == "normal"
+    finally:
+        view.controller.close()
