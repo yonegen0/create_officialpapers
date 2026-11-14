@@ -569,10 +569,10 @@ def test_circled_experience_headings_remove_editing_margin_flags(sample_template
     template.save(sample_template)
 
     source = (
-        "■ 主な経験・強み\\n\\n"
-        "### ① 事前準備で工夫したこと\\n\\n説明文です。\\n\\n"
-        "### ② 情報共有で工夫したこと\\n\\n説明文です。\\n\\n"
-        "■ 自己PR\\n\\n### ① 別セクションの見出し\\n\\n本文です。"
+        "■ 主な経験・強み\n\n"
+        "### ① 事前準備で工夫したこと\n\n説明文です。\n\n"
+        "### ② 情報共有で工夫したこと\n\n説明文です。\n\n"
+        "■ 自己PR\n\n### ① 別セクションの見出し\n\n本文です。"
     )
     doc = render_docx(parse_markdown(source))
     headings = [p for p in doc.paragraphs if p.text.startswith(("①", "②"))]
@@ -602,12 +602,12 @@ def test_self_pr_first_line_indent_for_each_paragraph(sample_template):
     from docx.shared import Pt
 
     source = (
-        "■ 職務要約\\n\\n要約の最初です。\\n\\n"
-        "■ 自己PR\\n\\n"
-        "私の強みは、正確な情報管理です。\\n\\n"
-        "前職では、予約情報の確認を行いました。\\n\\n"
-        "具体的には、予約表と変更記録を照合しました。\\n\\n"
-        "今後も、正確な事務処理を心がけます。\\n\\n以上"
+        "■ 職務要約\n\n要約の最初です。\n\n"
+        "■ 自己PR\n\n"
+        "私の強みは、正確な情報管理です。\n\n"
+        "前職では、予約情報の確認を行いました。\n\n"
+        "具体的には、予約表と変更記録を照合しました。\n\n"
+        "今後も、正確な事務処理を心がけます。\n\n以上"
     )
     doc = render_docx(parse_markdown(source))
     paragraphs = [p for p in doc.paragraphs if p.text in (
