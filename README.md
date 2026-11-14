@@ -56,9 +56,9 @@ py -3.13 -m venv .venv
 
 ## Wordのレイアウト
 
-A4縦、上下16mm、左右18mm、游ゴシック（East Asianフォントも設定）、本文10.5pt、行間1.15、本文段落後4pt、タイトル20pt、見出し1は13pt、見出し2は11.5pt、フッター中央にページ番号。会社情報表は左25% / 右75%、スキル表は左30% / 右70%です。
+**職務経歴書**は同梱の `markdown_to_word/assets/resume_template.docx` を基準に、書式付きの段落と表を複製し、Markdownの内容を挿入します。会社情報・職種別業務・スキルの行数は可変です。「【主な業務】」の箇条書きは「・」で表示し、固定改ページは複製しません。テンプレートが欠落・破損している場合は、異なるデザインへ自動切替せずエラーにします。テンプレートを選択するUIはありません。
 
-Wordの `keep_with_next` と `widow_control` を見出しスタイルなどに設定し、短い表行は `cantSplit`、表ヘッダーは `tblHeader` を指定します。全段落・会社単位の強制改ページ、ページ数固定調整は行いません。
+**標準文書**は既存方式を維持します。A4縦、上下16mm、左右18mm、游ゴシック、本文10.5pt、行間1.15、本文段落後4pt、タイトル20pt、見出し1は13pt、見出し2は11.5pt、フッター中央にページ番号が従来の設定です。見出しの `keep_with_next`、短い表行の `cantSplit`、表ヘッダーの `tblHeader` の制御も維持します。
 
 ## Windows向けEXEをビルド
 
@@ -100,7 +100,9 @@ Wordの `keep_with_next` と `widow_control` を見出しスタイルなどに�
 
 - `markdown_to_word/parser.py`：トークン解析と職務経歴書固有記法
 - `markdown_to_word/models.py`：文書の中間モデル
-- `markdown_to_word/docx_renderer.py`：Wordスタイル・表・改ページ制御
+- `markdown_to_word/docx_renderer.py`：スタイル別のWord出力振り分けと標準文書処理
+- `markdown_to_word/resume_template.py`：職務経歴書専用のテンプレート描画
+- `markdown_to_word/assets/resume_template.docx`：匿名化した職務経歴書の書式（同梱必須）
 - `markdown_to_word/output.py`：検証付きの安全な保存
 - `markdown_to_word/service.py`：2入力方式共通の処理
 - `markdown_to_word/gui/`：Tkinter画面と非同期制御
