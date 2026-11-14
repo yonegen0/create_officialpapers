@@ -440,8 +440,7 @@ def _keep_compact_role(left: tuple[Span, ...], entries: list[Block]) -> bool:
 
 
 def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc) -> None:
-    # The template provides distinct direct formatting for narrative content,
-    # the 【主な業務】 subheading, and its literal-bullet lines.
+    # Use the template's separate samples for narrative, subheading and tasks.
     source = [deepcopy(p._p) for p in cell.paragraphs]
     if len(source) < 3:
         raise ConversionError("Wordテンプレートの職務内容書式が不足しています。")
@@ -449,6 +448,7 @@ def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc) -
         if node.tag != qn("w:tcPr"):
             cell._tc.remove(node)
     tasks = False
+    narrative_index = 0
     for block in entries:
         subheading = _is_subheading(block)
         if _in_tasks_heading(block):
@@ -464,38 +464,45 @@ def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc) -
             if block.kind != "list":
                 tasks = False
         element = deepcopy(template)
-        rpr = _first_rpr(element)
+        rpr = _sample_rpr(element, normal=not subheading)
         _clean_paragraph(element)
         cell._tc.append(element)
         para = Paragraph(element, cell)
         spans = block.spans
-        if block.kind == "list" and tasks and not block.ordered:
-            spans = (Span("・" if not _text(spans).startswith("・") else ""),) + spans
+        literal_bullet = block.kind == "list" and tasks and not block.ordered
+        if literal_bullet:
+            if not _text(spans).startswith("・"):
+                spans = (Span("・"),) + spans
+            # A literal bullet and Word numbering must not coexist.
+            if para.style.name.startswith("List "):
+                para.style = doc.styles["Normal"]
         elif block.kind == "list":
             _native_list(para, block, list_ids, doc)
-        # Explicitly break inherited keep-chains from the exemplar.
+        elif block.kind == "paragraph":
+            spans = _emphasize_ability_label(spans)
+            if narrative_index:
+                para.paragraph_format.first_line_indent = Pt(9.9)
+            narrative_index += 1
         para.paragraph_format.keep_with_next = subheading
         para.paragraph_format.keep_together = subheading
         para.paragraph_format.widow_control = True
-        _append_spans(para, spans, rpr)
+        _append_spans(para, spans, rpr, size=9)
     if not entries:
         element = deepcopy(source[0])
         _clean_paragraph(element)
         cell._tc.append(element)
 
+
 def _draw_roles(doc, prototypes, roles: list[tuple[Block, list[Block]]], list_ids) -> None:
     if not roles:
         return
+    # The approved Word uses one table header, regardless of source labels.
     table = _new_table(doc, prototypes, "ROLE", header=True, count=len(roles))
-    _fill_cell(table.cell(0, 0), (Span("職種・期間"),))
-    _fill_cell(table.cell(0, 1), (Span("身につけた能力／経験・主な業務"),))
+    _fill_cell(table.cell(0, 0), (Span("職種・期間"),), size=9.5, bold=True)
+    _fill_cell(table.cell(0, 1), (Span("身につけた能力／経験・主な業務"),), size=9.5, bold=True)
     for index, (role, items) in enumerate(roles, 1):
         row = table.rows[index]
-        left_spans = _display_role_spans(role.spans)
-        title = _text(left_spans)
-        # Keep the original words while placing the period on its own line.
-        if len(role.spans) == 1 and re.search(r"（\d{4}年.*[～〜－-].*）$", title):
-            left_spans = (Span(re.sub(r"(?=（\d{4}年.*[～〜－-].*）$)", "\n", title)),)
+        left_spans = _break_role_period(_display_role_spans(role.spans))
         detail_items = items
         if items and items[0].kind == "paragraph" and re.fullmatch(
             r"\d{4}年\s*\d{1,2}月\s*[～〜－-]\s*(?:現在|\d{4}年\s*\d{1,2}月)",
@@ -503,9 +510,9 @@ def _draw_roles(doc, prototypes, roles: list[tuple[Block, list[Block]]], list_id
         ):
             left_spans = left_spans + (Span("\n"),) + items[0].spans
             detail_items = items[1:]
-        _fill_cell(row.cells[0], left_spans)
+        _fill_cell(row.cells[0], left_spans, size=9.5, bold=True)
         _write_cell_job(row.cells[1], detail_items, list_ids, doc)
-        # Leave lengthy multi-paragraph roles splittable in Word.
+        # A long row can cross pages; short rows stay together.
         _row_flag(row, "cantSplit", _keep_compact_role(left_spans, detail_items))
 
 
