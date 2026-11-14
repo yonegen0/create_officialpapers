@@ -54,7 +54,7 @@ def test_resume_company_and_tasks(sample_template):
     assert doc.tables[1].cell(0, 0).text == "職種・期間"
     assert doc.tables[1].cell(1, 0).text == "受付・一般事務"
     details = [p.text for p in doc.tables[1].cell(1, 1).paragraphs]
-    assert details == ["連絡調整を担当しました。", "【主な業務】", "来客対応", "日程調整"]
+    assert details == ["連絡調整を担当しました。", "【主な業務】", "・来客対応", "・日程調整"]
     assert "書式サンプル" not in "\n".join(p.text for p in doc.paragraphs) + "\n".join(
         cell.text for table in doc.tables for row in table.rows for cell in row.cells
     )
@@ -149,7 +149,7 @@ def test_bundled_real_template_roundtrip(tmp_path):
     assert len(reopened.tables) == 5
     assert [reopened.tables[i].cell(0, 1).text for i in (0, 2)] == ["架空A", "架空B"]
     assert [reopened.tables[1].cell(1, 1).paragraphs[i].text for i in range(4)] == [
-        "来客対応を行いました。", "【主な業務】", "電話対応", "予約確認"
+        "来客対応を行いました。", "【主な業務】", "・電話対応", "・予約確認"
     ]
     assert [reopened.tables[4].cell(i, 0).text for i in (1, 2)] == ["Word", "Excel"]
     assert [reopened.paragraphs[0].text, reopened.paragraphs[-1].text] == ["職務経歴書", "以上"]
@@ -182,7 +182,7 @@ def test_role_subheadings_remain_in_right_cell(sample_template):
         "来客対応や予約管理を担当しました。",
         "主な成果", "予約内容の確認方法を改善しました。",
         "工夫した点", "関係者への事前確認を徹底しました。",
-        "【主な業務】", "来客対応", "予約管理",
+        "【主な業務】", "・来客対応", "・予約管理",
     ]
     assert all(paragraphs[i].paragraph_format.keep_with_next for i in (1, 3, 5))
     assert all(paragraphs[i].paragraph_format.keep_with_next is False for i in (0, 2, 4, 7))
@@ -282,7 +282,7 @@ def test_resume_purpose_specific_format_and_periods(tmp_path):
     assert descriptions[0].runs[0].bold
     assert all(r.font.size.pt == 10.5 for p in descriptions for r in p.runs if r.text)
     assert descriptions[1].paragraph_format.first_line_indent.pt == 9.9
-    assert [p.text for p in descriptions[-2:]] == ["来客対応", "予約管理"]
+    assert [p.text for p in descriptions[-2:]] == ["・来客対応", "・予約管理"]
 
     strong = next(i for i, p in enumerate(doc.paragraphs) if p.text == "初めの説明です。")
     assert all(r.bold is False for r in doc.paragraphs[strong].runs if r.text)
@@ -322,7 +322,7 @@ def test_template_rpr_selector_and_unwanted_role_labels(sample_template):
     assert len(roles.rows) == 2
     assert roles.cell(1, 0).text == "受付"
     assert roles.cell(1, 1).paragraphs[0].runs[0].font.size.pt == 10.5
-    assert [p.text for p in roles.cell(1, 1).paragraphs][-1] == "電話対応"
+    assert [p.text for p in roles.cell(1, 1).paragraphs][-1] == "・電話対応"
     assert "職種・期間と身につけた能力" not in "\n".join(p.text for p in doc.paragraphs)
 
 
@@ -360,6 +360,19 @@ def test_resume_body_spacing_and_compact_page_links(sample_template):
         "■ 自己PR\n\n今後も改善を続けます。"
     )
     doc = render_docx(parse_markdown(source))
+    # Remove only the Word editing-margin square beside section titles.
+    # Preserve visible ■ and the next-page links for role/subheadings.
+    headings = [p for p in doc.paragraphs if p.text.startswith("■")]
+    assert [p.text for p in headings] == [
+        "■ 職務要約", "■ 職務経歴", "■ 主な経験・強み", "■ 自己PR"
+    ]
+    assert all(
+        p.paragraph_format.keep_with_next is False
+        and p.paragraph_format.keep_together is False
+        and p.paragraph_format.page_break_before is False
+        and p.paragraph_format.widow_control is False
+        for p in headings
+    )
     for text in ("最初の説明です。", "次の説明です。",
                  "短い冒頭です。", "短い続きです。", "今後も改善を続けます。"):
         para = next(p for p in doc.paragraphs if p.text == text)
@@ -399,7 +412,7 @@ def test_long_role_tail_bullets_link_only_short_flat_pair(sample_template):
     assert not _has_row_flag(role.rows[1], "cantSplit")
     paragraphs = role.cell(1, 1).paragraphs
     assert [p.text for p in paragraphs[-3:]] == [
-        "長めの準備作業", "来客対応", "予約確認"
+        "・長めの準備作業", "・来客対応", "・予約確認"
     ]
     assert paragraphs[-3].paragraph_format.keep_with_next is False
     assert paragraphs[-2].paragraph_format.keep_with_next is True
@@ -493,10 +506,10 @@ def test_history_table_layout_has_consistent_grid_borders_and_bullets(sample_tem
     assert all(doc.tables[1].cell(index, 0).paragraphs[0].paragraph_format.keep_with_next is False
                for index in (1, 2))
     tasks = [p for p in doc.tables[1].cell(1, 1).paragraphs
-             if p.text in ("国内外のお客様の受付・ご案内・呈茶", "電話対応")]
-    assert [p.text for p in tasks] == ["国内外のお客様の受付・ご案内・呈茶", "電話対応"]
-    assert all(p.paragraph_format.left_indent == Pt(0)
-               and p.paragraph_format.first_line_indent == Pt(0)
+             if p.text in ("・国内外のお客様の受付・ご案内・呈茶", "・電話対応")]
+    assert [p.text for p in tasks] == ["・国内外のお客様の受付・ご案内・呈茶", "・電話対応"]
+    assert all(p.paragraph_format.left_indent == Pt(10)
+               and p.paragraph_format.first_line_indent == Pt(-10)
                for p in tasks)
     assert all(p._p.pPr is None or p._p.pPr.numPr is None for p in tasks)
     assert all(not p.style.name.startswith("List ") for p in tasks)
