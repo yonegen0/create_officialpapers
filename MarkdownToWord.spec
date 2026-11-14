@@ -4,7 +4,10 @@ a = Analysis(
     ["markdown_to_word/gui_entry.py"],
     pathex=["."],
     binaries=[],
-    datas=[("markdown_to_word/assets/MarkdownToWord.ico", "markdown_to_word/assets")],
+    datas=[
+        ("markdown_to_word/assets/MarkdownToWord.ico", "markdown_to_word/assets"),
+        ("markdown_to_word/assets/resume_template.docx", "markdown_to_word/assets"),
+    ],
     hiddenimports=["markdown_it.rules_block.table"],
     hookspath=[],
     hooksconfig={},

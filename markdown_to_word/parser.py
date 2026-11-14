@@ -352,4 +352,5 @@ def parse_markdown(source: str, style: str = "職務経歴書") -> ParsedDocumen
         headings=sum(b.kind in ("heading", "meta_title") for b in blocks),
         tables=sum(b.kind == "table" for b in blocks),
         list_items=sum(b.kind == "list" for b in blocks),
+        style=style,
     )

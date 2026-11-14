@@ -260,6 +260,9 @@ def _ordered_numbering(doc, style_name: str, start: int) -> int:
 
 
 def render_docx(parsed: ParsedDocument) -> Document:
+    if parsed.style == "職務経歴書":
+        from .resume_template import render_resume
+        return render_resume(parsed)
     doc = Document()
     _setup(doc)
     list_numbers: dict[int, int] = {}

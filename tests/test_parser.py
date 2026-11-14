@@ -71,6 +71,7 @@ def test_style_separation_and_metadata_scope():
     assert d.blocks[-1].kind == "paragraph"
     standard = parse_markdown(src, "標準文書")
     assert all(x.kind not in ("meta_title", "meta_name") for x in standard.blocks)
+    assert d.style == "職務経歴書" and standard.style == "標準文書"
 
 
 def test_code_and_html_remain_literal():

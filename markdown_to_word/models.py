@@ -35,6 +35,8 @@ class ParsedDocument:
     headings: int = 0
     tables: int = 0
     list_items: int = 0
+    # Explicitly preserve the selected renderer without breaking positional callers.
+    style: str = "標準文書"
 
 
 @dataclass(frozen=True)
