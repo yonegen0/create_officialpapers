@@ -28,6 +28,8 @@ Markdownファイルまたは直接貼り付けた文章から、**編集可能�
 
 ## ソースから起動
 
+このフォルダーの `launch.bat` をダブルクリックすると起動します。ビルド済みの `dist\MarkdownToWord\MarkdownToWord.exe` があれば優先し、なければ `.venv`、`.venv-build` の順に既存のPython環境を使います。初回は以下の環境構築、または `build_release.bat` によるビルドが必要です。
+
 Windows 11 x64 / Python 3.13と、標準搭載のTkinterが必要です。
 
 ```bat
