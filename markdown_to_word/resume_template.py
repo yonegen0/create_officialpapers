@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+import re
 from zipfile import BadZipFile
 
 from docx import Document
@@ -280,9 +281,21 @@ def _draw_roles(doc, prototypes, roles: list[tuple[Block, list[Block]]], list_id
     _fill_cell(table.cell(0, 1), (Span("身につけた能力／経験・主な業務"),))
     for index, (role, items) in enumerate(roles, 1):
         row = table.rows[index]
-        _fill_cell(row.cells[0], role.spans)
-        _write_cell_job(row.cells[1], items, list_ids, doc)
-        length = len(_text(role.spans)) + sum(len(_text(item.spans)) for item in items)
+        title = _text(role.spans)
+        left_spans = role.spans
+        # Keep the original words while placing the period on its own line.
+        if len(role.spans) == 1 and re.search(r"（\d{4}年.*[～〜－-].*）$", title):
+            left_spans = (Span(re.sub(r"(?=（\d{4}年.*[～〜－-].*）$)", "\n", title)),)
+        detail_items = items
+        if items and items[0].kind == "paragraph" and re.fullmatch(
+            r"\d{4}年\s*\d{1,2}月\s*[～〜－-]\s*(?:現在|\d{4}年\s*\d{1,2}月)",
+            _text(items[0].spans).strip(),
+        ):
+            left_spans = left_spans + (Span("\n"),) + items[0].spans
+            detail_items = items[1:]
+        _fill_cell(row.cells[0], left_spans)
+        _write_cell_job(row.cells[1], detail_items, list_ids, doc)
+        length = len(_text(left_spans)) + sum(len(_text(item.spans)) for item in detail_items)
         # Split long descriptions naturally instead of moving the whole row.
         _row_flag(row, "cantSplit", length < 180)
 
