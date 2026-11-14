@@ -6,6 +6,7 @@ module deliberately does not reconstruct or approximate missing styles.
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 import re
 from zipfile import BadZipFile
@@ -17,6 +18,7 @@ from docx.oxml.ns import qn
 from docx.opc.constants import RELATIONSHIP_TYPE as RT
 from docx.table import Table
 from docx.text.paragraph import Paragraph
+from docx.shared import Pt, RGBColor
 
 from .errors import ConversionError
 from .models import Block, ParsedDocument, Span
@@ -66,9 +68,30 @@ def _load_template():
     return doc, paragraphs, tables
 
 
-def _format_run(run, prototype_rpr, span: Span) -> None:
+def _run_format(rpr, *, size: float | None = None, bold: bool | None = None) -> None:
+    """Apply only purpose-specific overrides to a cloned run format."""
+    if size is not None:
+        for tag in ("sz", "szCs"):
+            for old in list(rpr.findall(qn("w:" + tag))):
+                rpr.remove(old)
+            node = OxmlElement("w:" + tag)
+            node.set(qn("w:val"), str(round(size * 2)))
+            rpr.append(node)
+    if bold is not None:
+        for old in list(rpr.findall(qn("w:b"))):
+            rpr.remove(old)
+        node = OxmlElement("w:b")
+        node.set(qn("w:val"), "1" if bold else "0")
+        rpr.append(node)
+
+
+def _format_run(run, prototype_rpr, span: Span, *,
+                size: float | None = None, bold: bool | None = None) -> None:
     if prototype_rpr is not None:
         run._r.insert(0, deepcopy(prototype_rpr))
+    if size is not None or bold is not None:
+        _run_format(run._r.get_or_add_rPr(), size=size,
+                    bold=(bold or span.bold) if bold is not None else None)
     if span.bold:
         run.bold = True
     if span.italic:
@@ -77,7 +100,8 @@ def _format_run(run, prototype_rpr, span: Span) -> None:
         run.font.name = "Consolas"
 
 
-def _append_spans(para: Paragraph, spans: tuple[Span, ...], prototype_rpr) -> None:
+def _append_spans(para: Paragraph, spans: tuple[Span, ...], prototype_rpr,
+                  *, size: float | None = None, bold: bool | None = None) -> None:
     for span in spans:
         if span.link and span.link.lower().startswith(("https://", "http://", "mailto:")):
             for n, part in enumerate(span.text.split("\n")):
@@ -90,10 +114,25 @@ def _append_spans(para: Paragraph, spans: tuple[Span, ...], prototype_rpr) -> No
                 hyperlink.set(qn("r:id"), rel)
                 r = OxmlElement("w:r")
                 rpr = deepcopy(prototype_rpr) if prototype_rpr is not None else OxmlElement("w:rPr")
+                _run_format(rpr, size=size,
+                            bold=(bold or span.bold) if bold is not None else None)
                 if span.bold:
+                    for old in list(rpr.findall(qn("w:b"))):
+                        rpr.remove(old)
                     rpr.append(OxmlElement("w:b"))
                 if span.italic:
+                    for old in list(rpr.findall(qn("w:i"))):
+                        rpr.remove(old)
                     rpr.append(OxmlElement("w:i"))
+                if span.code:
+                    fonts = rpr.find(qn("w:rFonts"))
+                    if fonts is None:
+                        fonts = OxmlElement("w:rFonts")
+                        rpr.insert(0, fonts)
+                    fonts.set(qn("w:ascii"), "Consolas")
+                    fonts.set(qn("w:hAnsi"), "Consolas")
+                for old in list(rpr.findall(qn("w:u"))):
+                    rpr.remove(old)
                 underline = OxmlElement("w:u")
                 underline.set(qn("w:val"), "single")
                 rpr.append(underline)
@@ -106,7 +145,7 @@ def _append_spans(para: Paragraph, spans: tuple[Span, ...], prototype_rpr) -> No
         else:
             for n, part in enumerate(span.text.split("\n")):
                 run = para.add_run()
-                _format_run(run, prototype_rpr, span)
+                _format_run(run, prototype_rpr, span, size=size, bold=bold)
                 if n:
                     run.add_break()
                 if part:
@@ -119,39 +158,60 @@ def _clean_paragraph(element) -> None:
             element.remove(child)
     ppr = element.find(qn("w:pPr"))
     if ppr is not None:
-        # Never replicate intentional page breaks from an exemplar.
+        # The exemplar's numbering and manual breaks are not source text.
+        # _native_list() reintroduces numbering for Markdown lists.
         for child in list(ppr):
-            if child.tag == qn("w:pageBreakBefore"):
+            if child.tag in (qn("w:pageBreakBefore"), qn("w:numPr")):
                 ppr.remove(child)
 
 
-def _first_rpr(paragraph_element):
-    nodes = paragraph_element.xpath(".//w:rPr")
-    return deepcopy(nodes[0]) if nodes else None
+def _sample_rpr(paragraph_element, *, normal: bool = False):
+    """Choose the placeholder run or the normal-text run, not the first label."""
+    runs = paragraph_element.xpath("./w:r")
+    if normal:
+        for node in runs:
+            rpr = node.find(qn("w:rPr"))
+            if rpr is None:
+                continue
+            bold = rpr.find(qn("w:b"))
+            if bold is None or bold.get(qn("w:val")) in ("0", "false", "off"):
+                return deepcopy(rpr)
+    for node in runs:
+        if any("{{MTW_" in (t.text or "") for t in node.xpath("./w:t")):
+            rpr = node.find(qn("w:rPr"))
+            if rpr is not None:
+                return deepcopy(rpr)
+    for node in runs:
+        rpr = node.find(qn("w:rPr"))
+        if rpr is not None:
+            return deepcopy(rpr)
+    return None
 
 
-def _new_paragraph(doc, prototypes, key: str, spans: tuple[Span, ...]):
+def _new_paragraph(doc, prototypes, key: str, spans: tuple[Span, ...], *,
+                   size: float | None = None, bold: bool | None = None):
     source = prototypes.get(key)
     if source is None:
         source = prototypes["BODY"]
     element = deepcopy(source)
-    rpr = _first_rpr(element)
+    rpr = _sample_rpr(element, normal=(key == "BODY"))
     _clean_paragraph(element)
     doc.element.body.insert_element_before(element, "w:sectPr")
     para = Paragraph(element, doc._body)
-    _append_spans(para, spans, rpr)
+    _append_spans(para, spans, rpr, size=size, bold=bold)
     return para
 
 
-def _fill_cell(cell, spans: tuple[Span, ...]) -> None:
+def _fill_cell(cell, spans: tuple[Span, ...], *,
+               size: float | None = None, bold: bool | None = None) -> None:
     paras = cell.paragraphs
     if not paras:
         cell.add_paragraph()
         paras = cell.paragraphs
     first = paras[0]
-    rpr = _first_rpr(first._p)
+    rpr = _sample_rpr(first._p, normal=(bold is False))
     _clean_paragraph(first._p)
-    _append_spans(first, spans, rpr)
+    _append_spans(first, spans, rpr, size=size, bold=bold)
     for para in paras[1:]:
         para._p.getparent().remove(para._p)
     # Remove any original nested table/content in the prototype cell.
