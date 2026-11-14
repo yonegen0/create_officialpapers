@@ -469,6 +469,10 @@ def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc) -
         cell._tc.append(element)
         para = Paragraph(element, cell)
         spans = block.spans
+        # Body copy stays regular, even when the source Markdown has **bold**.
+        # Purpose-specific labels/subheadings are applied separately below.
+        if block.kind in ("paragraph", "list") and not subheading:
+            spans = tuple(replace(span, bold=False) for span in spans)
         literal_bullet = block.kind == "list" and tasks and not block.ordered
         if literal_bullet:
             if not _text(spans).startswith("・"):
@@ -552,7 +556,7 @@ def _draw_general_table(doc, block: Block) -> None:
 
 
 def _draw_block(doc, paragraphs, tables, block: Block, list_ids, *, tasks=False,
-                first_line_indent: float | None = None, strong_intro: bool = False):
+                first_line_indent: float | None = None):
     if block.kind == "table":
         if block.table_type == "company":
             _draw_company(doc, tables, block)
@@ -567,14 +571,15 @@ def _draw_block(doc, paragraphs, tables, block: Block, list_ids, *, tasks=False,
     }
     key = "BODY" if _in_tasks_heading(block) else keys.get(block.kind, "BODY")
     spans = block.spans
+    body_text = block.kind in ("paragraph", "list") and not _in_tasks_heading(block)
+    if body_text:
+        spans = tuple(replace(span, bold=False) for span in spans)
     if block.kind == "list" and tasks and not block.ordered:
         raw = _text(spans)
         spans = (Span("・" if not raw.startswith("・") else ""),) + spans
-    if strong_intro:
-        spans = tuple(replace(span, bold=True) for span in spans)
     p = _new_paragraph(doc, paragraphs, key, spans,
                        size=20 if block.kind == "meta_title" else None,
-                       bold=True if block.kind == "meta_title" else None)
+                       bold=True if block.kind == "meta_title" else False if body_text else None)
     if first_line_indent is not None:
         p.paragraph_format.first_line_indent = Pt(first_line_indent)
     if block.kind == "meta_title":
@@ -688,17 +693,15 @@ def render_resume(parsed: ParsedDocument):
         elif block.kind != "list":
             tasks = False
         indent = None
-        strong_intro = False
         if block.kind == "paragraph":
             if section == "職務要約":
                 indent = 0 if section_paragraph_count == 0 else 10.5
                 section_paragraph_count += 1
             elif section == "主な経験・強み" and episode_active:
                 indent = 0 if episode_paragraph_count == 0 else 10.5
-                strong_intro = episode_paragraph_count == 0
                 episode_paragraph_count += 1
         _draw_block(doc, paragraphs, tables, block, list_ids, tasks=tasks,
-                    first_line_indent=indent, strong_intro=strong_intro)
+                    first_line_indent=indent)
         i += 1
     _format_page_fields(doc)
     return doc
