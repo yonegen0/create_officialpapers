@@ -619,16 +619,13 @@ def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc,
             spans = tuple(replace(span, bold=False) for span in spans)
         literal_bullet = block.kind == "list" and tasks and not block.ordered
         if literal_bullet:
-            # Keep Markdown list items as independent paragraphs without a
-            # visible marker. Remove one pre-existing leading marker only.
-            if spans and spans[0].text.startswith("・"):
-                first_text = spans[0].text[1:].lstrip(" \u3000")
-                spans = ((replace(spans[0], text=first_text),) if first_text else ()) + spans[1:]
+            if not _text(spans).startswith("・"):
+                spans = (Span("・"),) + spans
             if para.style.name.startswith("List "):
                 para.style = doc.styles["Normal"]
-            # Wrapped lines begin at the same position as the first line.
-            para.paragraph_format.left_indent = Pt(0)
-            para.paragraph_format.first_line_indent = Pt(0)
+            # The literal ・ starts at the margin; wrapped lines align to text.
+            para.paragraph_format.left_indent = Pt(10)
+            para.paragraph_format.first_line_indent = Pt(-10)
         elif block.kind == "list":
             _native_list(para, block, list_ids, doc)
         elif block.kind == "paragraph":
@@ -780,7 +777,15 @@ def _draw_block(doc, paragraphs, tables, block: Block, list_ids, *, tasks=False,
         # exemplar happens to request keeping all lines on one page.
         if len(_text(spans)) > 110 or "\n" in _text(spans):
             p.paragraph_format.keep_together = False
-    if block.kind == "heading" or _in_tasks_heading(block):
+    if block.kind == "heading" and block.level == 1 and _text(block.spans).lstrip().startswith(("■", "▪")):
+        # Word displays a small black square in the editing margin for
+        # paragraph pagination controls. Do not apply them to section titles.
+        # An explicit False also overrides inherited heading-style settings.
+        p.paragraph_format.keep_with_next = False
+        p.paragraph_format.keep_together = False
+        p.paragraph_format.page_break_before = False
+        p.paragraph_format.widow_control = False
+    elif block.kind == "heading" or _in_tasks_heading(block):
         p.paragraph_format.keep_with_next = True
     if block.kind in ("meta_date", "meta_name", "meta_end"):
         p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
