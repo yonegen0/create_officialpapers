@@ -54,7 +54,7 @@ def test_resume_company_and_tasks(sample_template):
     assert doc.tables[1].cell(0, 0).text == "職種・期間"
     assert doc.tables[1].cell(1, 0).text == "受付・一般事務"
     details = [p.text for p in doc.tables[1].cell(1, 1).paragraphs]
-    assert details == ["連絡調整を担当しました。", "【主な業務】", "・来客対応", "・日程調整"]
+    assert details == ["連絡調整を担当しました。", "【主な業務】", "来客対応", "日程調整"]
     assert "書式サンプル" not in "\n".join(p.text for p in doc.paragraphs) + "\n".join(
         cell.text for table in doc.tables for row in table.rows for cell in row.cells
     )
@@ -149,7 +149,7 @@ def test_bundled_real_template_roundtrip(tmp_path):
     assert len(reopened.tables) == 5
     assert [reopened.tables[i].cell(0, 1).text for i in (0, 2)] == ["架空A", "架空B"]
     assert [reopened.tables[1].cell(1, 1).paragraphs[i].text for i in range(4)] == [
-        "来客対応を行いました。", "【主な業務】", "・電話対応", "・予約確認"
+        "来客対応を行いました。", "【主な業務】", "電話対応", "予約確認"
     ]
     assert [reopened.tables[4].cell(i, 0).text for i in (1, 2)] == ["Word", "Excel"]
     assert [reopened.paragraphs[0].text, reopened.paragraphs[-1].text] == ["職務経歴書", "以上"]
@@ -182,7 +182,7 @@ def test_role_subheadings_remain_in_right_cell(sample_template):
         "来客対応や予約管理を担当しました。",
         "主な成果", "予約内容の確認方法を改善しました。",
         "工夫した点", "関係者への事前確認を徹底しました。",
-        "【主な業務】", "・来客対応", "・予約管理",
+        "【主な業務】", "来客対応", "予約管理",
     ]
     assert all(paragraphs[i].paragraph_format.keep_with_next for i in (1, 3, 5))
     assert all(paragraphs[i].paragraph_format.keep_with_next is False for i in (0, 2, 4, 7))
@@ -280,9 +280,9 @@ def test_resume_purpose_specific_format_and_periods(tmp_path):
     descriptions = roles.cell(1, 1).paragraphs
     assert descriptions[0].text == "身につけた能力：日程管理と情報共有"
     assert descriptions[0].runs[0].bold
-    assert all(r.font.size.pt == 9 for p in descriptions for r in p.runs if r.text)
+    assert all(r.font.size.pt == 10.5 for p in descriptions for r in p.runs if r.text)
     assert descriptions[1].paragraph_format.first_line_indent.pt == 9.9
-    assert [p.text for p in descriptions[-2:]] == ["・来客対応", "・予約管理"]
+    assert [p.text for p in descriptions[-2:]] == ["来客対応", "予約管理"]
 
     strong = next(i for i, p in enumerate(doc.paragraphs) if p.text == "初めの説明です。")
     assert all(r.bold is False for r in doc.paragraphs[strong].runs if r.text)
@@ -321,8 +321,8 @@ def test_template_rpr_selector_and_unwanted_role_labels(sample_template):
     roles = doc.tables[1]
     assert len(roles.rows) == 2
     assert roles.cell(1, 0).text == "受付"
-    assert roles.cell(1, 1).paragraphs[0].runs[0].font.size.pt == 9
-    assert [p.text for p in roles.cell(1, 1).paragraphs][-1] == "・電話対応"
+    assert roles.cell(1, 1).paragraphs[0].runs[0].font.size.pt == 10.5
+    assert [p.text for p in roles.cell(1, 1).paragraphs][-1] == "電話対応"
     assert "職種・期間と身につけた能力" not in "\n".join(p.text for p in doc.paragraphs)
 
 
@@ -399,7 +399,7 @@ def test_long_role_tail_bullets_link_only_short_flat_pair(sample_template):
     assert not _has_row_flag(role.rows[1], "cantSplit")
     paragraphs = role.cell(1, 1).paragraphs
     assert [p.text for p in paragraphs[-3:]] == [
-        "・長めの準備作業", "・来客対応", "・予約確認"
+        "長めの準備作業", "来客対応", "予約確認"
     ]
     assert paragraphs[-3].paragraph_format.keep_with_next is False
     assert paragraphs[-2].paragraph_format.keep_with_next is True
@@ -429,7 +429,7 @@ def test_history_table_layout_has_consistent_grid_borders_and_bullets(sample_tem
         "■ 職務経歴\n\n"
         "勤務先\t架空株式会社A\n在籍期間\t2023年4月～現在\n雇用形態\t正社員\n\n"
         "### 受付（2023年10月～現在）\n\n短い説明です。\n\n"
-        "【主な業務】\n\n- 来客対応\n- 電話対応\n\n"
+        "【主な業務】\n\n- 国内外のお客様の受付・ご案内・呈茶\n- 電話対応\n\n"
         "### 企画（2021年4月～2023年9月）\n\n" + "長い業務説明です。" * 45 + "\n\n"
         "【主な業務】\n\n- 資料作成\n- 予定確認\n\n"
         "勤務先\t架空株式会社B\n在籍期間\t2021年4月～2023年3月\n\n"
@@ -468,7 +468,7 @@ def test_history_table_layout_has_consistent_grid_borders_and_bullets(sample_tem
         assert len(borders.findall(qn("w:top"))) == 1
         for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
             edge = borders.find(qn("w:" + side))
-            assert (edge.get(qn("w:sz")), edge.get(qn("w:color"))) == ("6", "8799AA")
+            assert (edge.get(qn("w:sz")), edge.get(qn("w:color"))) == ("8", "64748B")
         margins = tbl_pr.find(qn("w:tblCellMar"))
         assert [margins.find(qn("w:" + side)).get(qn("w:w"))
                 for side in ("top", "left", "bottom", "right")] == [
@@ -492,11 +492,16 @@ def test_history_table_layout_has_consistent_grid_borders_and_bullets(sample_tem
     assert doc.tables[1].cell(2, 0).text == "企画\n（2021年4月～\n2023年9月）"
     assert all(doc.tables[1].cell(index, 0).paragraphs[0].paragraph_format.keep_with_next is False
                for index in (1, 2))
-    bullets = [p for p in doc.tables[1].cell(1, 1).paragraphs if p.text.startswith("・")]
-    assert [p.text for p in bullets] == ["・来客対応", "・電話対応"]
-    assert all(p.paragraph_format.left_indent == Pt(10)
-               and p.paragraph_format.first_line_indent == Pt(-10)
-               for p in bullets)
+    tasks = [p for p in doc.tables[1].cell(1, 1).paragraphs
+             if p.text in ("国内外のお客様の受付・ご案内・呈茶", "電話対応")]
+    assert [p.text for p in tasks] == ["国内外のお客様の受付・ご案内・呈茶", "電話対応"]
+    assert all(p.paragraph_format.left_indent == Pt(0)
+               and p.paragraph_format.first_line_indent == Pt(0)
+               for p in tasks)
+    assert all(p._p.pPr is None or p._p.pPr.numPr is None for p in tasks)
+    assert all(not p.style.name.startswith("List ") for p in tasks)
+    assert all(run.font.size.pt == 10.5 for p in tasks for run in p.runs if run.text)
+    assert all(run.bold is False for p in tasks for run in p.runs if run.text)
     assert sum(cell.paragraphs[-1].paragraph_format.keep_with_next is True
                for row in doc.tables[0].rows for cell in row.cells) == 2
 
