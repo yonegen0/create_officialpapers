@@ -185,7 +185,8 @@ def test_role_subheadings_remain_in_right_cell(sample_template):
         "【主な業務】", "・来客対応", "・予約管理",
     ]
     assert all(paragraphs[i].paragraph_format.keep_with_next for i in (1, 3, 5))
-    assert all(paragraphs[i].paragraph_format.keep_with_next is False for i in (0, 2, 4, 6, 7))
+    assert all(paragraphs[i].paragraph_format.keep_with_next is False for i in (0, 2, 4, 7))
+    assert paragraphs[6].paragraph_format.keep_with_next is True
 
 
 def test_circled_role_and_episode_headings(sample_template):
@@ -342,3 +343,78 @@ def test_resume_body_markdown_bold_is_ignored(sample_template):
             continue
         assert all(run.bold is False for run in para.runs if run.text), para.text
     assert any(run.bold for run in doc.tables[1].cell(0, 0).paragraphs[0].runs)
+
+
+def test_resume_body_spacing_and_compact_page_links(sample_template):
+    from docx.shared import Pt
+
+    source = (
+        "■ 職務要約\n\n最初の説明です。\n\n次の説明です。\n\n"
+        "■ 職務経歴\n\n"
+        "勤務先\t架空A\n在籍期間\t2023年～現在\n雇用形態\t正社員\n\n"
+        "### 受付\n\n通常の説明です。\n\n"
+        "【主な業務】\n\n- 来客対応\n- 予約確認\n\n"
+        "■ 主な経験・強み\n\n① 工夫したこと\n\n"
+        "短い冒頭です。\n\n短い続きです。\n\n"
+        "② 別の工夫\n\n" + "長い説明です。" * 40 + "\n\n"
+        "■ 自己PR\n\n今後も改善を続けます。"
+    )
+    doc = render_docx(parse_markdown(source))
+    for text in ("最初の説明です。", "次の説明です。",
+                 "短い冒頭です。", "短い続きです。", "今後も改善を続けます。"):
+        para = next(p for p in doc.paragraphs if p.text == text)
+        assert para.paragraph_format.space_before == Pt(0)
+        assert para.paragraph_format.space_after == Pt(0)
+    company, roles = doc.tables
+    assert len(company.rows) == 3
+    for row in company.rows[:-1]:
+        assert all(c.paragraphs[-1].paragraph_format.keep_with_next
+                   for c in row.cells)
+    assert all(c.paragraphs[-1].paragraph_format.keep_with_next is False
+               for c in company.rows[-1].cells)
+    details = roles.cell(1, 1).paragraphs
+    for para in (details[0], details[2], details[3]):
+        assert para.paragraph_format.space_before == Pt(0)
+        assert para.paragraph_format.space_after == Pt(0)
+    assert details[1].text == "【主な業務】"
+    assert details[1].paragraph_format.keep_with_next
+    intro = next(p for p in doc.paragraphs if p.text == "短い冒頭です。")
+    continuation = next(p for p in doc.paragraphs if p.text == "短い続きです。")
+    long_intro = next(p for p in doc.paragraphs if p.text.startswith("長い説明です。"))
+    assert intro.paragraph_format.keep_with_next is True
+    assert continuation.paragraph_format.keep_with_next is False
+    assert long_intro.paragraph_format.keep_with_next is False
+    assert long_intro.paragraph_format.keep_together is False
+    assert not _has_row_flag(roles.rows[1], "cantSplit")
+
+
+def test_long_role_tail_bullets_link_only_short_flat_pair(sample_template):
+    source = (
+        "■ 職務経歴\n\n勤務先\t架空A\n在籍期間\t2023年～現在\n\n"
+        "### 受付\n\n" + "説明です。" * 45 + "\n\n"
+        "【主な業務】\n\n- 長めの準備作業\n- 来客対応\n- 予約確認\n"
+    )
+    doc = render_docx(parse_markdown(source))
+    role = doc.tables[1]
+    assert not _has_row_flag(role.rows[1], "cantSplit")
+    paragraphs = role.cell(1, 1).paragraphs
+    assert [p.text for p in paragraphs[-3:]] == [
+        "・長めの準備作業", "・来客対応", "・予約確認"
+    ]
+    assert paragraphs[-3].paragraph_format.keep_with_next is False
+    assert paragraphs[-2].paragraph_format.keep_with_next is True
+    assert paragraphs[-1].paragraph_format.keep_with_next is False
+    assert all(p.paragraph_format.space_after.pt == 0 for p in paragraphs[-3:])
+
+
+def test_long_company_table_is_not_chained(sample_template):
+    source = (
+        "■ 職務経歴\n\n"
+        "勤務先\t架空A\n在籍期間\t2023年～現在\n"
+        "事業内容\t" + "長い所在地" * 28 + "\n\n"
+        "### 受付\n\n通常の説明です。"
+    )
+    doc = render_docx(parse_markdown(source))
+    company = doc.tables[0]
+    assert all(c.paragraphs[-1].paragraph_format.keep_with_next is not True
+               for row in company.rows for c in row.cells)

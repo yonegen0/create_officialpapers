@@ -243,6 +243,15 @@ def _keep_compact_table_row(cells: tuple[tuple[Span, ...], ...]) -> bool:
     )
 
 
+def _keep_compact_company_table(rows: list[tuple[tuple[Span, ...], ...]]) -> bool:
+    """Join only small company tables; avoid moving long tables as a unit."""
+    return (
+        1 < len(rows) <= 6
+        and all(_keep_compact_table_row(cells) for cells in rows)
+        and sum(len(_text(cell).strip()) for cells in rows for cell in cells) <= 360
+    )
+
+
 def _new_table(doc, prototypes, key: str, *, header: bool, count: int):
     source = deepcopy(prototypes[key])
     old_rows = list(source.tr_lst)
@@ -273,10 +282,16 @@ def _draw_company(doc, prototypes, block: Block) -> None:
     if not rows:
         return
     table = _new_table(doc, prototypes, "COMPANY", header=False, count=len(rows))
+    compact_table = _keep_compact_company_table(rows)
     for ri, cells in enumerate(rows):
         for ci in range(min(2, len(cells))):
             _fill_cell(table.cell(ri, ci), cells[ci], size=10, bold=(ci == 0))
         _row_flag(table.rows[ri], "cantSplit", _keep_compact_table_row(cells))
+        if compact_table:
+            # Row-level cantSplit cannot keep a complete multi-row table together.
+            # Both cells join to the next row, never to the following role table.
+            for cell in table.rows[ri].cells:
+                cell.paragraphs[-1].paragraph_format.keep_with_next = ri < len(rows) - 1
 
 
 def _draw_skill(doc, prototypes, block: Block) -> None:
@@ -439,7 +454,8 @@ def _keep_compact_role(left: tuple[Span, ...], entries: list[Block]) -> bool:
     )
 
 
-def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc) -> None:
+def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc,
+                    *, link_trailing_bullets: bool = False) -> None:
     # Separate paragraph exemplars for narrative text, task headings and bullets.
     source = [deepcopy(p._p) for p in cell.paragraphs]
     if len(source) < 3:
@@ -449,7 +465,7 @@ def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc) -
             cell._tc.remove(node)
     tasks = False
     narrative_index = 0
-    for block in entries:
+    for index, block in enumerate(entries):
         subheading = _is_subheading(block)
         if _in_tasks_heading(block):
             tasks = True
@@ -486,7 +502,29 @@ def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc) -
             if narrative_index:
                 para.paragraph_format.first_line_indent = Pt(9.9)
             narrative_index += 1
-        para.paragraph_format.keep_with_next = subheading
+        if block.kind in ("paragraph", "list") and not subheading:
+            para.paragraph_format.space_before = Pt(0)
+            para.paragraph_format.space_after = Pt(0)
+        # Never chain the whole list. Only the last two concise, flat items
+        # in the same task list may travel together in a splittable role row.
+        short_tail_pair = False
+        if link_trailing_bullets and literal_bullet and index + 1 < len(entries):
+            next_block = entries[index + 1]
+            later = entries[index + 2] if index + 2 < len(entries) else None
+            same_pair = (
+                next_block.kind == "list" and not next_block.ordered
+                and block.level == next_block.level == 1
+                and block.list_id == next_block.list_id
+                and all("\n" not in _text(item.spans)
+                        and len(_text(item.spans)) <= 45
+                        for item in (block, next_block))
+            )
+            ends_list = later is None or not (
+                later.kind == "list" and later.list_id == block.list_id
+                and later.level == block.level and later.ordered == block.ordered
+            )
+            short_tail_pair = same_pair and ends_list
+        para.paragraph_format.keep_with_next = subheading or short_tail_pair
         para.paragraph_format.keep_together = subheading
         para.paragraph_format.widow_control = True
         _append_spans(para, spans, rpr, size=9,
@@ -515,8 +553,10 @@ def _draw_roles(doc, prototypes, roles: list[tuple[Block, list[Block]]], list_id
             left_spans = left_spans + (Span("\n"),) + items[0].spans
             detail_items = items[1:]
         _fill_cell(row.cells[0], left_spans, size=9.5, bold=True)
-        _write_cell_job(row.cells[1], detail_items, list_ids, doc)
-        _row_flag(row, "cantSplit", _keep_compact_role(left_spans, detail_items))
+        compact_role = _keep_compact_role(left_spans, detail_items)
+        _write_cell_job(row.cells[1], detail_items, list_ids, doc,
+                        link_trailing_bullets=not compact_role)
+        _row_flag(row, "cantSplit", compact_role)
 
 
 def _native_list(para, block: Block, list_ids: dict[int, int], doc) -> None:
@@ -556,7 +596,8 @@ def _draw_general_table(doc, block: Block) -> None:
 
 
 def _draw_block(doc, paragraphs, tables, block: Block, list_ids, *, tasks=False,
-                first_line_indent: float | None = None):
+                first_line_indent: float | None = None,
+                episode_link_next: bool = False):
     if block.kind == "table":
         if block.table_type == "company":
             _draw_company(doc, tables, block)
@@ -592,6 +633,14 @@ def _draw_block(doc, paragraphs, tables, block: Block, list_ids, *, tasks=False,
                 fonts.set(qn("w:eastAsia"), "Meiryo UI")
     if block.kind == "list" and not (tasks and not block.ordered):
         _native_list(p, block, list_ids, doc)
+    if body_text:
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after = Pt(0)
+        p.paragraph_format.keep_with_next = episode_link_next
+        # A long paragraph must be free to split even if its template
+        # exemplar happens to request keeping all lines on one page.
+        if len(_text(spans)) > 110 or "\n" in _text(spans):
+            p.paragraph_format.keep_together = False
     if block.kind == "heading" or _in_tasks_heading(block):
         p.paragraph_format.keep_with_next = True
     if block.kind in ("meta_date", "meta_name", "meta_end"):
@@ -693,15 +742,26 @@ def render_resume(parsed: ParsedDocument):
         elif block.kind != "list":
             tasks = False
         indent = None
+        link_episode_intro = False
         if block.kind == "paragraph":
             if section == "職務要約":
                 indent = 0 if section_paragraph_count == 0 else 10.5
                 section_paragraph_count += 1
             elif section == "主な経験・強み" and episode_active:
                 indent = 0 if episode_paragraph_count == 0 else 10.5
+                if episode_paragraph_count == 0 and i + 1 < len(blocks):
+                    following = blocks[i + 1]
+                    intro = _text(block.spans)
+                    continuation = (_text(following.spans)
+                                    if following.kind == "paragraph" else "")
+                    link_episode_intro = (
+                        following.kind == "paragraph"
+                        and all(value and "\n" not in value and len(value) <= 65
+                                for value in (intro, continuation))
+                    )
                 episode_paragraph_count += 1
         _draw_block(doc, paragraphs, tables, block, list_ids, tasks=tasks,
-                    first_line_indent=indent)
+                    first_line_indent=indent, episode_link_next=link_episode_intro)
         i += 1
     _format_page_fields(doc)
     return doc
