@@ -321,8 +321,8 @@ def _style_history_table(table: Table, doc, *, company: bool) -> None:
     for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
         edge = OxmlElement("w:" + side)
         edge.set(qn("w:val"), "single")
-        edge.set(qn("w:sz"), "6")  # 0.75 pt (eighths of a point)
-        edge.set(qn("w:color"), "8799AA")
+        edge.set(qn("w:sz"), "8")  # 1.0 pt (eighths of a point)
+        edge.set(qn("w:color"), "64748B")
         borders.append(edge)
 
     margins = tbl_pr.find(qn("w:tblCellMar"))
@@ -619,13 +619,16 @@ def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc,
             spans = tuple(replace(span, bold=False) for span in spans)
         literal_bullet = block.kind == "list" and tasks and not block.ordered
         if literal_bullet:
-            if not _text(spans).startswith("・"):
-                spans = (Span("・"),) + spans
+            # Keep Markdown list items as independent paragraphs without a
+            # visible marker. Remove one pre-existing leading marker only.
+            if spans and spans[0].text.startswith("・"):
+                first_text = spans[0].text[1:].lstrip(" \u3000")
+                spans = ((replace(spans[0], text=first_text),) if first_text else ()) + spans[1:]
             if para.style.name.startswith("List "):
                 para.style = doc.styles["Normal"]
-            # The literal ・ starts at the margin; wrapped lines align to text.
-            para.paragraph_format.left_indent = Pt(10)
-            para.paragraph_format.first_line_indent = Pt(-10)
+            # Wrapped lines begin at the same position as the first line.
+            para.paragraph_format.left_indent = Pt(0)
+            para.paragraph_format.first_line_indent = Pt(0)
         elif block.kind == "list":
             _native_list(para, block, list_ids, doc)
         elif block.kind == "paragraph":
@@ -658,7 +661,7 @@ def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc,
         para.paragraph_format.keep_with_next = subheading or short_tail_pair
         para.paragraph_format.keep_together = subheading
         para.paragraph_format.widow_control = True
-        _append_spans(para, spans, rpr, size=9,
+        _append_spans(para, spans, rpr, size=10.5,
                       bold=True if subheading else False if block.kind in ("paragraph", "list") else None)
     if not entries:
         element = deepcopy(source[0])
