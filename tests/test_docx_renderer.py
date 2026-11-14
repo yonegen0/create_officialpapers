@@ -30,6 +30,9 @@ def sample_template(tmp_path, monkeypatch):
         if key != "COMPANY":
             table.cell(1, 0).text = "書式サンプル（出力不可）"
             table.cell(1, 1).text = "書式サンプル（出力不可）"
+            if key == "ROLE":
+                table.cell(1, 1).add_paragraph("{{MTW_ROLE_1}}")
+                table.cell(1, 1).add_paragraph("{{MTW_ROLE_2}}")
     path = tmp_path / "resume_template.docx"
     doc.save(path)
     monkeypatch.setattr(resume, "_TEMPLATE_PATH", path)
