@@ -368,9 +368,9 @@ def test_resume_body_spacing_and_compact_page_links(sample_template):
     company, roles = doc.tables
     assert len(company.rows) == 3
     for row in company.rows[:-1]:
-        assert all(c.paragraphs[-1].paragraph_format.keep_with_next
-                   for c in row.cells)
-    assert all(c.paragraphs[-1].paragraph_format.keep_with_next is False
+        assert row.cells[0].paragraphs[-1].paragraph_format.keep_with_next is not True
+        assert row.cells[1].paragraphs[-1].paragraph_format.keep_with_next is True
+    assert all(c.paragraphs[-1].paragraph_format.keep_with_next is not True
                for c in company.rows[-1].cells)
     details = roles.cell(1, 1).paragraphs
     for para in (details[0], details[2], details[3]):
@@ -418,3 +418,67 @@ def test_long_company_table_is_not_chained(sample_template):
     company = doc.tables[0]
     assert all(c.paragraphs[-1].paragraph_format.keep_with_next is not True
                for row in company.rows for c in row.cells)
+
+
+
+def test_history_table_layout_has_consistent_grid_borders_and_bullets(sample_template):
+    """One synthetic case covers multiple companies, roles, and a long role."""
+    from docx.shared import Cm, Pt
+
+    source = (
+        "■ 職務経歴\n\n"
+        "勤務先\t架空株式会社A\n在籍期間\t2023年4月～現在\n雇用形態\t正社員\n\n"
+        "### 受付（2023年4月～現在）\n\n短い説明です。\n\n"
+        "【主な業務】\n\n- 来客対応\n- 電話対応\n\n"
+        "### 企画\n\n" + "長い業務説明です。" * 45 + "\n\n"
+        "【主な業務】\n\n- 資料作成\n- 予定確認\n\n"
+        "勤務先\t架空株式会社B\n在籍期間\t2021年4月～2023年3月\n\n"
+        "### 一般事務\n\n書類整理を担当しました。"
+    )
+    doc = render_docx(parse_markdown(source))
+    assert len(doc.tables) == 4
+    expected = min(Cm(17.4), doc.sections[0].page_width -
+                   doc.sections[0].left_margin - doc.sections[0].right_margin)
+    for index, table in enumerate(doc.tables):
+        company = index in (0, 2)
+        assert table.autofit is False
+        assert abs(sum(col.width for col in table.columns) - expected) < Cm(0.01)
+        left_cm = 3.5 if company else 4.2
+        assert abs(table.columns[0].width - expected * left_cm / 17.4) < Cm(0.01)
+        assert all(
+            abs(cell.width - table.columns[ci].width) < Cm(0.01)
+            for row in table.rows for ci, cell in enumerate(row.cells)
+        )
+        tbl_pr = table._tbl.tblPr
+        assert tbl_pr.find(qn("w:tblW")).get(qn("w:type")) == "dxa"
+        borders = tbl_pr.find(qn("w:tblBorders"))
+        assert len(borders.findall(qn("w:top"))) == 1
+        for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+            edge = borders.find(qn("w:" + side))
+            assert (edge.get(qn("w:sz")), edge.get(qn("w:color"))) == ("4", "A8BAC8")
+        margins = tbl_pr.find(qn("w:tblCellMar"))
+        assert [margins.find(qn("w:" + side)).get(qn("w:w"))
+                for side in ("top", "left", "bottom", "right")] == [
+                    "100", "120", "100", "120"
+                ]
+        for ri, row in enumerate(table.rows):
+            for ci, cell in enumerate(row.cells):
+                tc_pr = cell._tc.get_or_add_tcPr()
+                assert tc_pr.find(qn("w:tcBorders")) is None
+                assert tc_pr.find(qn("w:tcMar")) is None
+                color = ("E7F0F7" if ci == 0 else "FFFFFF") if company else (
+                    "244F77" if ri == 0 else "F1F6FA" if ci == 0 else "FFFFFF"
+                )
+                assert tc_pr.find(qn("w:shd")).get(qn("w:fill")) == color
+    assert all(run.font.color.rgb == resume.RGBColor(255, 255, 255)
+               for cell in doc.tables[1].rows[0].cells
+               for para in cell.paragraphs for run in para.runs if run.text)
+    assert _has_row_flag(doc.tables[1].rows[0], "tblHeader")
+    assert not _has_row_flag(doc.tables[1].rows[2], "cantSplit")
+    bullets = [p for p in doc.tables[1].cell(1, 1).paragraphs if p.text.startswith("・")]
+    assert [p.text for p in bullets] == ["・来客対応", "・電話対応"]
+    assert all(p.paragraph_format.left_indent == Pt(10)
+               and p.paragraph_format.first_line_indent == Pt(-10)
+               for p in bullets)
+    assert sum(cell.paragraphs[-1].paragraph_format.keep_with_next is True
+               for row in doc.tables[0].rows for cell in row.cells) == 2

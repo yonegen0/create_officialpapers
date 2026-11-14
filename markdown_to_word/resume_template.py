@@ -12,13 +12,14 @@ import re
 from zipfile import BadZipFile
 
 from docx import Document
+from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.opc.constants import RELATIONSHIP_TYPE as RT
 from docx.table import Table
 from docx.text.paragraph import Paragraph
-from docx.shared import Pt, RGBColor
+from docx.shared import Cm, Pt, RGBColor
 
 from .errors import ConversionError
 from .models import Block, ParsedDocument, Span
@@ -275,6 +276,76 @@ def _new_table(doc, prototypes, key: str, *, header: bool, count: int):
     return table
 
 
+def _style_history_table(table: Table, doc, *, company: bool) -> None:
+    """Style only company/role tables, preserving the source template."""
+    section = doc.sections[-1]
+    available = section.page_width - section.left_margin - section.right_margin
+    # Keep the intended 17.4 cm proportions without overflowing page margins.
+    total = int(min(Cm(17.4), available) / 635) * 635  # EMUs per twip
+    left = round(total * (3.5 if company else 4.2) / 17.4 / 635) * 635
+    widths = (left, total - left)
+    table.autofit = False
+    tbl_pr = table._tbl.tblPr
+    tbl_w = tbl_pr.find(qn("w:tblW"))
+    if tbl_w is None:
+        tbl_w = OxmlElement("w:tblW")
+        tbl_pr.insert(0, tbl_w)
+    tbl_w.set(qn("w:type"), "dxa")
+    tbl_w.set(qn("w:w"), str(total // 635))
+
+    borders = tbl_pr.find(qn("w:tblBorders"))
+    if borders is None:
+        borders = OxmlElement("w:tblBorders")
+        tbl_pr.append(borders)
+    for old in list(borders):
+        borders.remove(old)
+    for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        edge = OxmlElement("w:" + side)
+        edge.set(qn("w:val"), "single")
+        edge.set(qn("w:sz"), "4")  # 0.5 pt (eighths of a point)
+        edge.set(qn("w:color"), "A8BAC8")
+        borders.append(edge)
+
+    margins = tbl_pr.find(qn("w:tblCellMar"))
+    if margins is None:
+        margins = OxmlElement("w:tblCellMar")
+        tbl_pr.append(margins)
+    for old in list(margins):
+        margins.remove(old)
+    for side, twips in (("top", 100), ("left", 120),
+                        ("bottom", 100), ("right", 120)):
+        margin = OxmlElement("w:" + side)
+        margin.set(qn("w:w"), str(twips))
+        margin.set(qn("w:type"), "dxa")
+        margins.append(margin)
+
+    for ci, width in enumerate(widths):
+        table.columns[ci].width = width
+    for ri, row in enumerate(table.rows):
+        for ci, cell in enumerate(row.cells):
+            cell.width = widths[ci]
+            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+            tc_pr = cell._tc.get_or_add_tcPr()
+            # Prototype cell borders/margins would override the table-wide design.
+            for old in list(tc_pr):
+                if old.tag in (qn("w:tcBorders"), qn("w:tcMar")):
+                    tc_pr.remove(old)
+            shading = tc_pr.find(qn("w:shd"))
+            if shading is None:
+                shading = OxmlElement("w:shd")
+                tc_pr.append(shading)
+            shading.attrib.clear()
+            shading.set(qn("w:val"), "clear")
+            shade = ("E7F0F7" if ci == 0 else "FFFFFF") if company else (
+                "244F77" if ri == 0 else "F1F6FA" if ci == 0 else "FFFFFF"
+            )
+            shading.set(qn("w:fill"), shade)
+            if not company and ri == 0:
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+
+
 def _draw_company(doc, prototypes, block: Block) -> None:
     rows = [row for row in block.rows
             if not (len(row) == 2 and _text(row[0]).strip() == "項目"
@@ -287,11 +358,13 @@ def _draw_company(doc, prototypes, block: Block) -> None:
         for ci in range(min(2, len(cells))):
             _fill_cell(table.cell(ri, ci), cells[ci], size=10, bold=(ci == 0))
         _row_flag(table.rows[ri], "cantSplit", _keep_compact_table_row(cells))
-        if compact_table:
-            # Row-level cantSplit cannot keep a complete multi-row table together.
-            # Both cells join to the next row, never to the following role table.
-            for cell in table.rows[ri].cells:
-                cell.paragraphs[-1].paragraph_format.keep_with_next = ri < len(rows) - 1
+        # cantSplit keeps a short row together. Only the end-of-row paragraph
+        # needs keepNext to link it to the next row; two copies are redundant.
+        for ci, cell in enumerate(table.rows[ri].cells):
+            cell.paragraphs[-1].paragraph_format.keep_with_next = (
+                True if compact_table and ci == 1 and ri < len(rows) - 1 else None
+            )
+    _style_history_table(table, doc, company=True)
 
 
 def _draw_skill(doc, prototypes, block: Block) -> None:
@@ -495,6 +568,9 @@ def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc,
                 spans = (Span("・"),) + spans
             if para.style.name.startswith("List "):
                 para.style = doc.styles["Normal"]
+            # The literal ・ starts at the margin; wrapped lines align to text.
+            para.paragraph_format.left_indent = Pt(10)
+            para.paragraph_format.first_line_indent = Pt(-10)
         elif block.kind == "list":
             _native_list(para, block, list_ids, doc)
         elif block.kind == "paragraph":
@@ -557,6 +633,7 @@ def _draw_roles(doc, prototypes, roles: list[tuple[Block, list[Block]]], list_id
         _write_cell_job(row.cells[1], detail_items, list_ids, doc,
                         link_trailing_bullets=not compact_role)
         _row_flag(row, "cantSplit", compact_role)
+    _style_history_table(table, doc, company=False)
 
 
 def _native_list(para, block: Block, list_ids: dict[int, int], doc) -> None:
