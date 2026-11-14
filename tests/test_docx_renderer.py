@@ -251,7 +251,7 @@ def test_resume_purpose_specific_format_and_periods(tmp_path):
         "■ 主な経験・強み\n\n"
         "① 事前準備\n\n初めの説明です。\n\n後続の説明です。\n\n"
         "■ 活かせる経験・スキル\n\n"
-        "経験・能力\t内容\nWord\t文書作成\n\n以上"
+        "経験・能力\t内容\nWord\t文書作成\nExcel\t表計算\n\n以上"
     )
     result = render_docx(parse_markdown(source))
     path = tmp_path / "formatted.docx"
