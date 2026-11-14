@@ -284,9 +284,26 @@ def _style_history_table(table: Table, doc, *, company: bool) -> None:
     available = section.page_width - section.left_margin - section.right_margin
     # Keep the intended 17.4 cm proportions without overflowing page margins.
     total = int(min(Cm(17.4), available) / 635) * 635  # EMUs per twip
-    left = round(total * (3.5 if company else 4.2) / 17.4 / 635) * 635
+    left = round(total * 3.5 / 17.4 / 635) * 635
     widths = (left, total - left)
     table.autofit = False
+    # Both template tables must have the same two-column OOXML grid; Word
+    # otherwise synthesizes a narrow third column when it joins adjacent tables.
+    grid = table._tbl.tblGrid
+    for old in list(grid):
+        grid.remove(old)
+    for width in widths:
+        column = OxmlElement("w:gridCol")
+        column.set(qn("w:w"), str(width // 635))
+        grid.append(column)
+    for row in table.rows:
+        if len(row._tr.tc_lst) != 2:
+            raise ConversionError("職務経歴表のテンプレートは2列である必要があります。")
+        for tc in row._tr.tc_lst:
+            tc_pr = tc.get_or_add_tcPr()
+            for old in tc_pr.findall(qn("w:gridSpan")):
+                tc_pr.remove(old)
+
     tbl_pr = table._tbl.tblPr
     tbl_w = tbl_pr.find(qn("w:tblW"))
     if tbl_w is None:
@@ -304,8 +321,8 @@ def _style_history_table(table: Table, doc, *, company: bool) -> None:
     for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
         edge = OxmlElement("w:" + side)
         edge.set(qn("w:val"), "single")
-        edge.set(qn("w:sz"), "4")  # 0.5 pt (eighths of a point)
-        edge.set(qn("w:color"), "A8BAC8")
+        edge.set(qn("w:sz"), "6")  # 0.75 pt (eighths of a point)
+        edge.set(qn("w:color"), "8799AA")
         borders.append(edge)
 
     margins = tbl_pr.find(qn("w:tblCellMar"))
@@ -365,7 +382,7 @@ def _draw_company(doc, prototypes, block: Block) -> None:
         for ci, cell in enumerate(table.rows[ri].cells):
             paragraph = cell.paragraphs[-1]
             paragraph.paragraph_format.keep_with_next = (
-                True if compact_table and ci == 1 and ri < len(rows) - 1 else None
+                compact_table and ci == 1 and ri < len(rows) - 1
             )
             # A lengthy company value must not inherit keepLines from the
             # short template sample when its row is allowed to split.
@@ -494,6 +511,35 @@ def _break_role_period(spans: tuple[Span, ...]) -> tuple[Span, ...]:
     if not match or match.start() == 0 or text[match.start() - 1] == "\n":
         return spans
     offset = match.start()
+    output = []
+    for span in spans:
+        length = len(span.text)
+        if 0 < offset < length:
+            output.append(replace(span, text=span.text[:offset]))
+            output.append(replace(span, text="\n" + span.text[offset:]))
+        elif offset == 0:
+            output.append(replace(span, text="\n" + span.text))
+        else:
+            output.append(span)
+        offset -= length
+    return tuple(output)
+
+
+def _wrap_long_role_period(spans: tuple[Span, ...]) -> tuple[Span, ...]:
+    """Break long year-month ranges after the separator, not inside a date."""
+    text = _text(spans)
+    match = re.search(
+        r"（?(\d{4}年\s*(\d{1,2})月\s*[～〜－-])\s*(現在|\d{4}年\s*\d{1,2}月)）?$",
+        text,
+    )
+    if not match or (
+        match.group(3) == "現在"
+        and (not match.group(0).startswith("（") or len(match.group(2)) < 2)
+    ):
+        return spans
+    offset = match.end(1)
+    if text[offset:offset + 1] == "\n":
+        return spans
     output = []
     for span in spans:
         length = len(span.text)
@@ -637,7 +683,11 @@ def _draw_roles(doc, prototypes, roles: list[tuple[Block, list[Block]]], list_id
         ):
             left_spans = left_spans + (Span("\n"),) + items[0].spans
             detail_items = items[1:]
+        left_spans = _wrap_long_role_period(left_spans)
         _fill_cell(row.cells[0], left_spans, size=9.5, bold=True)
+        # A role label must not inherit keepNext from its template sample:
+        # the row's cantSplit flag already protects compact role entries.
+        row.cells[0].paragraphs[0].paragraph_format.keep_with_next = False
         compact_role = _keep_compact_role(left_spans, detail_items)
         _write_cell_job(row.cells[1], detail_items, list_ids, doc,
                         link_trailing_bullets=not compact_role)
