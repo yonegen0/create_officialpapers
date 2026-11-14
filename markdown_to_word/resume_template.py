@@ -552,7 +552,8 @@ def _draw_general_table(doc, block: Block) -> None:
                     fonts.set(qn("w:" + attr), "Meiryo UI")
 
 
-def _draw_block(doc, paragraphs, tables, block: Block, list_ids, *, tasks=False):
+def _draw_block(doc, paragraphs, tables, block: Block, list_ids, *, tasks=False,
+                first_line_indent: float | None = None, strong_intro: bool = False):
     if block.kind == "table":
         if block.table_type == "company":
             _draw_company(doc, tables, block)
@@ -570,7 +571,21 @@ def _draw_block(doc, paragraphs, tables, block: Block, list_ids, *, tasks=False)
     if block.kind == "list" and tasks and not block.ordered:
         raw = _text(spans)
         spans = (Span("・" if not raw.startswith("・") else ""),) + spans
-    p = _new_paragraph(doc, paragraphs, key, spans)
+    if strong_intro:
+        spans = tuple(replace(span, bold=True) for span in spans)
+    p = _new_paragraph(doc, paragraphs, key, spans,
+                       size=20 if block.kind == "meta_title" else None,
+                       bold=True if block.kind == "meta_title" else None)
+    if first_line_indent is not None:
+        p.paragraph_format.first_line_indent = Pt(first_line_indent)
+    if block.kind == "meta_title":
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p.paragraph_format.first_line_indent = Pt(0)
+        for run in p.runs:
+            run.font.name = "Meiryo UI"
+            fonts = run._r.get_or_add_rPr().find(qn("w:rFonts"))
+            if fonts is not None:
+                fonts.set(qn("w:eastAsia"), "Meiryo UI")
     if block.kind == "list" and not (tasks and not block.ordered):
         _native_list(p, block, list_ids, doc)
     if block.kind == "heading" or _in_tasks_heading(block):
@@ -615,6 +630,19 @@ def _work_after_company(doc, paragraphs, tables, blocks: tuple[Block, ...], list
     flush()
 
 
+def _format_page_fields(doc) -> None:
+    """Match existing PAGE fields without adding or duplicating them."""
+    for section in doc.sections:
+        for para in section.footer.paragraphs:
+            instructions = para._p.xpath(".//w:instrText")
+            if not any(re.search(r"\bPAGE\b", node.text or "") for node in instructions):
+                continue
+            para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            for run in para.runs:
+                run.font.size = Pt(9)
+                run.font.color.rgb = RGBColor(0x6E, 0x6E, 0x6E)
+
+
 def render_resume(parsed: ParsedDocument):
     """Build a résumé from Markdown while cloning original DOCX formatting.
 
@@ -624,13 +652,25 @@ def render_resume(parsed: ParsedDocument):
     list_ids: dict[int, int] = {}
     in_history = False
     tasks = False
+    section = ""
+    section_paragraph_count = 0
+    episode_active = False
+    episode_paragraph_count = 0
     blocks = parsed.blocks
     i = 0
     while i < len(blocks):
         block = blocks[i]
         if block.kind == "heading" and block.level == 1:
-            in_history = _text(block.spans).strip().removeprefix("■").strip() == "職務経歴"
+            section = _text(block.spans).strip().removeprefix("■").strip()
+            in_history = section == "職務経歴"
             tasks = False
+            section_paragraph_count = 0
+            episode_active = False
+            episode_paragraph_count = 0
+        elif (section == "主な経験・強み" and block.kind == "heading"
+              and block.level >= 2):
+            episode_active = bool(_CIRCLED_PREFIX.match(_text(block.spans).strip()))
+            episode_paragraph_count = 0
         if in_history and block.kind == "table" and block.table_type == "company":
             _draw_company(doc, tables, block)
             j = i + 1
@@ -648,6 +688,18 @@ def render_resume(parsed: ParsedDocument):
             tasks = True
         elif block.kind != "list":
             tasks = False
-        _draw_block(doc, paragraphs, tables, block, list_ids, tasks=tasks)
+        indent = None
+        strong_intro = False
+        if block.kind == "paragraph":
+            if section == "職務要約":
+                indent = 0 if section_paragraph_count == 0 else 10.5
+                section_paragraph_count += 1
+            elif section == "主な経験・強み" and episode_active:
+                indent = 0 if episode_paragraph_count == 0 else 10.5
+                strong_intro = episode_paragraph_count == 0
+                episode_paragraph_count += 1
+        _draw_block(doc, paragraphs, tables, block, list_ids, tasks=tasks,
+                    first_line_indent=indent, strong_intro=strong_intro)
         i += 1
+    _format_page_fields(doc)
     return doc
