@@ -125,3 +125,35 @@ def test_numbering_start_and_independence():
         item = next(n for n in numbering.findall(qn("w:num")) if int(n.get(qn("w:numId"))) == number_id)
         assert item.find(qn("w:lvlOverride")).find(qn("w:startOverride")).get(qn("w:val")) == str(start)
 
+
+
+def test_bundled_real_template_roundtrip(tmp_path):
+    """Exercise the approved, anonymized DOCX instead of only the fake fixture."""
+    source = (
+        "職務経歴書\n\n2026年11月14日現在\n\n氏名：架空 花子\n\n"
+        "■ 職務要約\n\n予約内容を確認し、関係者と調整してきました。\n\n"
+        "■ 職務経歴\n\n"
+        "勤務先\t架空A\n在籍期間\t2023年4月～現在\n雇用形態\t正社員\n\n"
+        "### 受付（2023年4月～現在）\n\n来客対応を行いました。\n\n"
+        "【主な業務】\n\n- 電話対応\n- 予約確認\n\n"
+        "勤務先\t架空B\n在籍期間\t2021年4月～2023年3月\n\n"
+        "### 一般事務\n\n資料作成を行いました。\n\n"
+        "■ 活かせる経験・スキル\n\n"
+        "経験・能力\t内容\nWord\t案内文作成\nExcel\t入力管理\n\n"
+        "■ 自己PR\n\n相手の状況を確認しています。\n\n以上"
+    )
+    rendered = render_docx(parse_markdown(source))
+    file = tmp_path / "resume.docx"
+    rendered.save(file)
+    reopened = Document(file)
+    assert len(reopened.tables) == 5
+    assert [reopened.tables[i].cell(0, 1).text for i in (0, 2)] == ["架空A", "架空B"]
+    assert [reopened.tables[1].cell(1, 1).paragraphs[i].text for i in range(4)] == [
+        "来客対応を行いました。", "【主な業務】", "・電話対応", "・予約確認"
+    ]
+    assert [reopened.tables[4].cell(i, 0).text for i in (1, 2)] == ["Word", "Excel"]
+    assert [reopened.paragraphs[0].text, reopened.paragraphs[-1].text] == ["職務経歴書", "以上"]
+    all_text = "\n".join(p.text for p in reopened.paragraphs)
+    all_text += "\n".join(c.text for t in reopened.tables for row in t.rows for c in row.cells)
+    assert "山崎製パン" not in all_text and "{{MTW_" not in all_text
+    assert file.stat().st_size > 1000
