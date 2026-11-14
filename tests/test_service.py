@@ -71,7 +71,7 @@ def test_batch_four_files_and_same_stem_numbering(tmp_path):
     from markdown_to_word.batch import prepare_batch, convert_batch
     files = [tmp_path / name for name in ("企業A.md", "企業A.txt", "企業B.markdown", "企業C.md")]
     for path in files:
-        path.write_text("# 見出し\\n\\n本文", encoding="utf-8")
+        path.write_text("# 見出し\n\n本文", encoding="utf-8")
     existing = tmp_path / "企業A.docx"
     existing.write_bytes(b"untouched")
 
@@ -93,7 +93,7 @@ def test_batch_continues_after_invalid_and_changed_input(tmp_path):
                                 ("正常1.md", "読込失敗.md", "変更.md", "正常2.md"))
     for path in (first, changed, last):
         path.write_text("# 見出し", encoding="utf-8")
-    bad.write_bytes(b"\\xff\\xfe\\xff")
+    bad.write_bytes(b"\xff\xfe\xff")
     items = prepare_batch((first, bad, changed, last), "標準文書")
     assert sum(item.error is not None for item in items) == 1
     changed.write_text("# 更新後", encoding="utf-8")
