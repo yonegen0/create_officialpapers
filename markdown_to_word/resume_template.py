@@ -12,13 +12,14 @@ import re
 from zipfile import BadZipFile
 
 from docx import Document
+from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.opc.constants import RELATIONSHIP_TYPE as RT
 from docx.table import Table
 from docx.text.paragraph import Paragraph
-from docx.shared import Pt, RGBColor
+from docx.shared import Cm, Pt, RGBColor
 
 from .errors import ConversionError
 from .models import Block, ParsedDocument, Span
@@ -275,6 +276,66 @@ def _new_table(doc, prototypes, key: str, *, header: bool, count: int):
     return table
 
 
+
+def _style_history_table(table: Table, doc, *, company: bool) -> None:
+    """Use one fixed grid and quiet borders for both history table types."""
+    usable = min(section.page_width - section.left_margin - section.right_margin
+                 for section in doc.sections)
+    total_width = min(Cm(17.4), usable)
+    left_width = min(Cm(3.5 if company else 4.2), int(total_width * 0.3))
+    widths = (left_width, total_width - left_width)
+    table.autofit = False
+    for column, width in zip(table.columns, widths):
+        column.width = width
+
+    properties = table._tbl.tblPr
+    table_width = properties.find(qn("w:tblW"))
+    if table_width is None:
+        table_width = OxmlElement("w:tblW")
+        properties.insert(0, table_width)
+    table_width.set(qn("w:type"), "dxa")
+    table_width.set(qn("w:w"), str(round(total_width / 635)))
+
+    for existing in list(properties.findall(qn("w:tblBorders"))):
+        properties.remove(existing)
+    borders = OxmlElement("w:tblBorders")
+    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        line = OxmlElement("w:" + edge)
+        line.set(qn("w:val"), "single")
+        line.set(qn("w:sz"), "4")  # eighths of a point: 0.5 pt
+        line.set(qn("w:color"), "A8BAC8")
+        borders.append(line)
+    properties.insert_element_before(borders, "w:shd", "w:tblLayout",
+                                     "w:tblCellMar", "w:tblLook")
+
+    for row_index, row in enumerate(table.rows):
+        for col_index, cell in enumerate(row.cells):
+            cell.width = widths[col_index]
+            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+            tcpr = cell._tc.get_or_add_tcPr()
+            # The template's cell-level borders would override tblBorders.
+            for tag in ("tcBorders", "shd", "tcMar"):
+                for existing in list(tcpr.findall(qn("w:" + tag))):
+                    tcpr.remove(existing)
+            fill = ("E7F0F7" if company else
+                    "244F77" if row_index == 0 else
+                    "F1F6FA" if col_index == 0 else "FFFFFF")
+            shading = OxmlElement("w:shd")
+            shading.set(qn("w:val"), "clear")
+            shading.set(qn("w:fill"), fill if col_index == 0 or not company else "FFFFFF")
+            tcpr.insert_element_before(shading, "w:noWrap", "w:tcMar",
+                                       "w:textDirection", "w:tcFitText", "w:vAlign")
+            margins = OxmlElement("w:tcMar")
+            for side, twips in (("top", 100), ("left", 120),
+                                ("bottom", 100), ("right", 120)):
+                margin = OxmlElement("w:" + side)
+                margin.set(qn("w:w"), str(twips))
+                margin.set(qn("w:type"), "dxa")
+                margins.append(margin)
+            tcpr.insert_element_before(margins, "w:textDirection",
+                                       "w:tcFitText", "w:vAlign")
+
+
 def _draw_company(doc, prototypes, block: Block) -> None:
     rows = [row for row in block.rows
             if not (len(row) == 2 and _text(row[0]).strip() == "項目"
@@ -282,16 +343,23 @@ def _draw_company(doc, prototypes, block: Block) -> None:
     if not rows:
         return
     table = _new_table(doc, prototypes, "COMPANY", header=False, count=len(rows))
+    _style_history_table(table, doc, company=True)
     compact_table = _keep_compact_company_table(rows)
     for ri, cells in enumerate(rows):
         for ci in range(min(2, len(cells))):
-            _fill_cell(table.cell(ri, ci), cells[ci], size=10, bold=(ci == 0))
+            cell = table.cell(ri, ci)
+            _fill_cell(cell, cells[ci], size=10, bold=(ci == 0))
+            paragraph = cell.paragraphs[-1]
+            paragraph.paragraph_format.space_before = Pt(0)
+            paragraph.paragraph_format.space_after = Pt(0)
+            # Drop the prototype's pagination flags, even for long tables.
+            paragraph.paragraph_format.keep_with_next = None
+            paragraph.paragraph_format.keep_together = None
         _row_flag(table.rows[ri], "cantSplit", _keep_compact_table_row(cells))
-        if compact_table:
-            # Row-level cantSplit cannot keep a complete multi-row table together.
-            # Both cells join to the next row, never to the following role table.
-            for cell in table.rows[ri].cells:
-                cell.paragraphs[-1].paragraph_format.keep_with_next = ri < len(rows) - 1
+        if compact_table and ri < len(rows) - 1:
+            # In Word a keep-next paragraph links the current row to the next.
+            # One cell per row avoids duplicating the visible editing marker.
+            table.cell(ri, 1).paragraphs[-1].paragraph_format.keep_with_next = True
 
 
 def _draw_skill(doc, prototypes, block: Block) -> None:
@@ -495,6 +563,9 @@ def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc,
                 spans = (Span("・"),) + spans
             if para.style.name.startswith("List "):
                 para.style = doc.styles["Normal"]
+            # Literal Japanese bullets: align wrapped lines after the glyph.
+            para.paragraph_format.left_indent = Pt(9)
+            para.paragraph_format.first_line_indent = Pt(-9)
         elif block.kind == "list":
             _native_list(para, block, list_ids, doc)
         elif block.kind == "paragraph":
@@ -540,8 +611,13 @@ def _draw_roles(doc, prototypes, roles: list[tuple[Block, list[Block]]], list_id
         return
     # The ideal Word includes a genuine header; remove only duplicate labels.
     table = _new_table(doc, prototypes, "ROLE", header=True, count=len(roles))
+    _style_history_table(table, doc, company=False)
     _fill_cell(table.cell(0, 0), (Span("職種・期間"),), size=9.5, bold=True)
     _fill_cell(table.cell(0, 1), (Span("身につけた能力／経験・主な業務"),), size=9.5, bold=True)
+    for cell in table.rows[0].cells:
+        for paragraph in cell.paragraphs:
+            for run in paragraph.runs:
+                run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
     for index, (role, items) in enumerate(roles, 1):
         row = table.rows[index]
         left_spans = _break_role_period(_display_role_spans(role.spans))
