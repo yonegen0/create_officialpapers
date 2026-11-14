@@ -235,43 +235,42 @@ def _is_role(block: Block) -> bool:
 
 
 def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc) -> None:
-    source = cell.paragraphs[0]._p
-    body_rpr = _first_rpr(source)
-    pristine = deepcopy(source)
-    _fill_cell(cell, ())
-    # The first description line retains the original template cell spacing.
-    first = True
+    # The template provides distinct direct formatting for narrative content,
+    # the 【主な業務】 subheading, and its literal-bullet lines.
+    source = [deepcopy(p._p) for p in cell.paragraphs]
+    if len(source) < 3:
+        raise ConversionError("Wordテンプレートの職務内容書式が不足しています。")
+    for node in list(cell._tc):
+        if node.tag != qn("w:tcPr"):
+            cell._tc.remove(node)
     tasks = False
     for block in entries:
-        if block.kind == "table":
-            # Complex nested tables are kept outside job rows by the caller.
-            continue
         if _in_tasks_heading(block):
             tasks = True
-        elif block.kind != "list":
-            tasks = False
-        if first:
-            para = cell.paragraphs[0]
-            first = False
+            template = source[1]
+        elif block.kind == "list" and tasks and not block.ordered:
+            template = source[2]
         else:
-            element = deepcopy(pristine)
-            _clean_paragraph(element)
-            cell._tc.append(element)
-            para = Paragraph(element, cell)
+            template = source[0]
+            if block.kind != "list":
+                tasks = False
+        element = deepcopy(template)
+        rpr = _first_rpr(element)
+        _clean_paragraph(element)
+        cell._tc.append(element)
+        para = Paragraph(element, cell)
         spans = block.spans
         if block.kind == "list" and tasks and not block.ordered:
-            raw = _text(spans)
-            spans = (Span("・" if not raw.startswith("・") else ""),) + spans
-            # This is literal typography, never a native List Bullet.
+            spans = (Span("・" if not _text(spans).startswith("・") else ""),) + spans
         elif block.kind == "list":
             _native_list(para, block, list_ids, doc)
-        elif _in_tasks_heading(block):
+        if _in_tasks_heading(block):
             para.paragraph_format.keep_with_next = True
-        _append_spans(para, spans, body_rpr)
+        _append_spans(para, spans, rpr)
     if not entries:
-        # Never fabricate résumé text to fill an empty description.
-        _fill_cell(cell, ())
-
+        element = deepcopy(source[0])
+        _clean_paragraph(element)
+        cell._tc.append(element)
 
 def _draw_roles(doc, prototypes, roles: list[tuple[Block, list[Block]]], list_ids) -> None:
     if not roles:
