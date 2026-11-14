@@ -20,7 +20,7 @@ test = ["pytest>=8,<10"]
 include = ["markdown_to_word*"]
 
 [tool.setuptools.package-data]
-markdown_to_word = ["assets/*.ico"]
+markdown_to_word = ["assets/*.ico", "assets/*.docx"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
