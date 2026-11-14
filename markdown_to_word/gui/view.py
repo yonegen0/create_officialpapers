@@ -20,6 +20,9 @@ class TkView:
         setup(root)
         self.input_mode = tk.StringVar(value="file")
         self.file_path = tk.StringVar()
+        self.file_count = tk.StringVar(value="")
+        self._batch_mode = False
+        self._single_output_name = ""
         self.style = tk.StringVar(value="職務経歴書")
         self.output_name = tk.StringVar(value=f"文書_{datetime.now():%Y%m%d}.docx")
         home = Path.home()
@@ -113,6 +116,20 @@ class TkView:
             style="App.TEntry",
         )
         self.file_name.pack(fill="x", pady=(px(self.root, 4), 0))
+        ttk.Label(self.file_section, textvariable=self.file_count, style="CardMuted.TLabel").pack(
+            anchor="w", pady=(px(self.root, 5), 0),
+        )
+        self.file_list_frame = ttk.Frame(self.file_section, style="Card.TFrame")
+        self.file_list = tk.Listbox(
+            self.file_list_frame, height=4, font=(self.root._word_font_family, 9),
+            bg=colors["card"], fg=colors["text"], selectmode="browse",
+            activestyle="none", relief="solid", borderwidth=1,
+        )
+        file_scroll = ttk.Scrollbar(self.file_list_frame, orient="vertical", command=self.file_list.yview)
+        self.file_list.configure(yscrollcommand=file_scroll.set)
+        self.file_list.pack(side="left", fill="both", expand=True)
+        file_scroll.pack(side="right", fill="y")
+        self.file_list.bind("<MouseWheel>", self._file_list_wheel)
 
         self.paste_section = ttk.Frame(card, style="Card.TFrame")
         ttk.Label(
@@ -170,12 +187,15 @@ class TkView:
         self.metrics = ttk.Frame(card, style="Card.TFrame")
         self.metrics.pack(fill="x", pady=(0, px(self.root, 10)))
         self.metric_tiles = []
+        self.metric_titles = {}
         for key, label in (
             ("characters", "文字数"), ("headings", "見出し"),
             ("tables", "表"), ("list_items", "箇条書き"),
         ):
             tile = ttk.Frame(self.metrics, style="Metric.TFrame", padding=px(self.root, 10))
-            ttk.Label(tile, text=label, style="MetricTitle.TLabel").pack(anchor="w")
+            title = ttk.Label(tile, text=label, style="MetricTitle.TLabel")
+            title.pack(anchor="w")
+            self.metric_titles[key] = title
             ttk.Label(tile, textvariable=self.metric_values[key], style="MetricValue.TLabel").pack(anchor="w")
             self.metric_tiles.append(tile)
         self.metrics.bind("<Configure>", self._adapt_metrics)
@@ -303,6 +323,38 @@ class TkView:
             self.file_section.pack(fill="x")
         else:
             self.paste_section.pack(fill="x")
+        if hasattr(self, "controller"):
+            self.set_batch_mode(self.controller.is_batch())
+
+    def _file_list_wheel(self, event):
+        self.file_list.yview_scroll(-int(event.delta / 120) if event.delta else 0, "units")
+        return "break"
+
+    def show_selected_files(self, paths: tuple[Path, ...]) -> None:
+        self.file_count.set(f"{len(paths)}件選択中" if len(paths) > 1 else "")
+        self.file_list.delete(0, "end")
+        for path in paths:
+            self.file_list.insert("end", path.name)
+        if len(paths) > 1:
+            self.file_name.pack_forget()
+            self.file_list_frame.pack(fill="x", pady=(px(self.root, 4), 0))
+        else:
+            self.file_list_frame.pack_forget()
+            self.file_name.pack(fill="x", pady=(px(self.root, 4), 0))
+
+    def set_batch_mode(self, enabled: bool) -> None:
+        if self._batch_mode != enabled:
+            if enabled:
+                self._single_output_name = self.output_name.get()
+                self.output_name.set("元ファイル名を使用")
+            else:
+                self.output_name.set(self._single_output_name)
+            self._batch_mode = enabled
+        if not self.controller.busy:
+            self.name_entry.configure(state="disabled" if enabled else "normal")
+        self.generate_button.configure(
+            text=f"Wordを{len(self.controller.selected_files)}件まとめて生成" if enabled else "Wordを生成"
+        )
 
     def _select_all_text(self, event):
         self.input_text.tag_add("sel", "1.0", "end-1c")
@@ -336,11 +388,13 @@ class TkView:
             "① Markdownファイルを選ぶか文章を貼り付ける\n"
             "② 文書スタイル、出力ファイル名、保存先を設定する\n"
             "③ 事前確認を実行し、Wordを生成する\n\n"
-            "同名ファイルがある場合は、置換・別名保存・キャンセルを選べます。",
+            "複数選択時は各ファイルを個別のWordへ生成し、同名なら自動連番します。\n"
+            "単体生成では置換・別名保存・キャンセルを選べます。",
             self.root,
         )
 
     def show_preview(self, preview):
+        self._set_metric_titles(("文字数", "見出し", "表", "箇条書き"))
         document = preview.document
         self.metric_values["characters"].set(f"{document.characters:,}")
         self.metric_values["headings"].set(str(document.headings))
@@ -352,7 +406,26 @@ class TkView:
         )
         self.warning.set("\n".join("注意: " + w for w in document.warnings) or "警告はありません")
 
+    def _set_metric_titles(self, names: tuple[str, str, str, str]):
+        for key, label in zip(self.metric_values, names):
+            self.metric_titles[key].configure(text=label)
+
+    def show_batch_preview(self, items):
+        self._set_metric_titles(("選択ファイル", "生成可能", "エラー", "警告"))
+        successes = [item for item in items if item.preview is not None]
+        failures = [item for item in items if item.error is not None]
+        warnings = sum(len(item.preview.document.warnings) for item in successes)
+        for key, value in zip(self.metric_values, (len(items), len(successes), len(failures), warnings)):
+            self.metric_values[key].set(str(value))
+        self.info.set(f"選択：{len(items)}  生成可能：{len(successes)}  エラー：{len(failures)}  警告：{warnings}")
+        problems = [f"{item.path.name}：{item.error}" for item in failures]
+        self.warning.set(
+            "\n".join(problems) if problems else
+            (f"{warnings}件の警告があります。" if warnings else "全ファイルの事前確認が完了しました。")
+        )
+
     def clear_preview(self):
+        self._set_metric_titles(("文字数", "見出し", "表", "箇条書き"))
         for value in self.metric_values.values():
             value.set("—")
         self.info.set("文字数：—   見出し：—   表：—   箇条書き：—")
@@ -371,9 +444,14 @@ class TkView:
             widget.configure(state="disabled" if busy else "normal")
         self.style_combo.configure(state="disabled" if busy else "readonly")
         self.input_text.configure(state="disabled" if busy else "normal")
-        has_output = not busy and self.controller.last_output is not None
-        self.open_button.configure(state="normal" if has_output else "disabled")
-        self.open_folder_button.configure(state="normal" if has_output else "disabled")
+        if not busy:
+            self.name_entry.configure(state="disabled" if self._batch_mode else "normal")
+        single = self.controller.last_result_kind != "batch" and self.controller.last_output is not None
+        batch = (self.controller.last_result_kind == "batch" and
+                 self.controller.last_batch_result is not None and
+                 bool(self.controller.last_batch_result.saved))
+        self.open_button.configure(state="normal" if not busy and single else "disabled")
+        self.open_folder_button.configure(state="normal" if not busy and (single or batch) else "disabled")
         if busy:
             self.mark_previous_output()
             self.progress.start(14)
@@ -381,11 +459,34 @@ class TkView:
             self.progress.stop()
 
     def mark_previous_output(self):
-        if self.controller.last_output is None:
+        if self.controller.last_result_kind == "batch" and self.controller.last_batch_result:
+            result = self.controller.last_batch_result
+            self.success.set(
+                f"前回の一括生成結果：成功 {len(result.saved)}件・失敗 {len(result.failures)}件"
+                f"\n保存先：{result.folder}"
+            )
+        elif self.controller.last_output is not None:
+            path = self.controller.last_output
+            self.success.set(f"前回生成したWordファイル\nファイル名：{path.name}\n保存先：{path.parent}")
+        else:
             self.success.set("")
-            return
-        path = self.controller.last_output
-        self.success.set(f"前回生成したWordファイル\nファイル名：{path.name}\n保存先：{path.parent}")
+
+    def show_batch_result(self, result):
+        lines = [
+            f"一括生成{'停止' if result.stopped_reason else '完了'}：{result.total}件中"
+            f"{len(result.saved)}件成功・{len(result.failures)}件失敗"
+        ]
+        lines.extend(f"成功：{path.name}" for path in result.saved)
+        lines.extend(f"失敗：{path.name} — {reason}" for path, reason in result.failures)
+        if result.stopped_reason:
+            lines.append(f"処理停止：{result.stopped_reason}")
+        if result.processed < result.total:
+            lines.append(f"未処理：{result.total - result.processed}件")
+        if result.saved:
+            lines.append(f"保存先：{result.folder}")
+        self.success.set("\n".join(lines))
+        self.open_button.configure(state="disabled")
+        self.open_folder_button.configure(state="normal" if result.saved else "disabled")
 
     def show_success(self, path: Path):
         self.success.set(

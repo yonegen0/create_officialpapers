@@ -20,7 +20,7 @@ def test_input_modes_preserve_text_and_file_selection(tmp_path, monkeypatch):
         source = tmp_path / "架空.md"
         source.write_text("# ファイル", encoding="utf-8")
         from markdown_to_word.gui import controller
-        monkeypatch.setattr(controller.filedialog, "askopenfilename", lambda **kw: str(source))
+        monkeypatch.setattr(controller.filedialog, "askopenfilenames", lambda **kw: (str(source),))
         view.controller.choose_file()
         assert view.file_path.get() == str(source)
         assert view.output_name.get() == "架空.docx"
@@ -133,3 +133,68 @@ def test_busy_disables_editing_and_output_actions(tmp_path):
     finally:
         view.controller.close()
 
+
+
+def test_gui_batch_selection_preview_generation_and_paste_compatibility(tmp_path, monkeypatch):
+    root, view = _window()
+    try:
+        from markdown_to_word.gui import controller
+        paths = [tmp_path / f"企業{i}.md" for i in range(3)]
+        for index, path in enumerate(paths):
+            path.write_text(f"# 会社{index}\n\n本文", encoding="utf-8")
+        view.style.set("標準文書")
+        files = tuple(str(path) for path in paths)
+        monkeypatch.setattr(controller.filedialog, "askopenfilenames", lambda **kw: files)
+        view.controller.choose_file()
+        assert len(view.controller.selected_files) == 3
+        assert view.file_count.get() == "3件選択中"
+        assert view.output_name.get() == "元ファイル名を使用"
+        assert str(view.name_entry.cget("state")) == "disabled"
+
+        # Cancelling the dialog must leave the selection unchanged.
+        monkeypatch.setattr(controller.filedialog, "askopenfilenames", lambda **kw: ())
+        view.controller.choose_file()
+        assert len(view.controller.selected_files) == 3
+
+        view.input_text.insert("1.0", "# 貼り付けた文章")
+        view.input_mode.set("paste")
+        assert view.input_text.get("1.0", "end-1c") == "# 貼り付けた文章"
+        assert str(view.name_entry.cget("state")) == "normal"
+        view.input_mode.set("file")
+        assert str(view.name_entry.cget("state")) == "disabled"
+
+        view.controller.confirm()
+        assert view.controller.busy
+        assert str(view.file_button.cget("state")) == "disabled"
+        for _ in range(300):
+            root.update()
+            if not view.controller.busy:
+                break
+            time.sleep(0.01)
+        assert not view.controller.busy
+        assert view.metric_values["headings"].get() == "3"  # batch '生成可能' tile
+
+        view.controller.generate()
+        assert view.controller.busy
+        assert str(view.dir_entry.cget("state")) == "disabled"
+        assert str(view.exit_button.cget("state")) == "disabled"
+        for _ in range(400):
+            root.update()
+            if not view.controller.busy:
+                break
+            time.sleep(0.01)
+        assert not view.controller.busy
+        assert len(list(tmp_path.glob("*.docx"))) == 3
+        assert view.controller.last_batch_result is not None
+        assert len(view.controller.last_batch_result.saved) == 3
+        assert str(view.open_button.cget("state")) == "disabled"
+        assert str(view.open_folder_button.cget("state")) == "normal"
+        assert "3件成功" in view.success.get()
+
+        # Switching back to a single file restores the editable filename.
+        monkeypatch.setattr(controller.filedialog, "askopenfilenames", lambda **kw: (str(paths[0]),))
+        view.controller.choose_file()
+        assert view.output_name.get() == "企業0.docx"
+        assert str(view.name_entry.cget("state")) == "normal"
+    finally:
+        view.controller.close()
