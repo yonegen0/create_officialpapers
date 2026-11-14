@@ -130,7 +130,9 @@ def _first_rpr(paragraph_element):
 
 
 def _new_paragraph(doc, prototypes, key: str, spans: tuple[Span, ...]):
-    source = prototypes.get(key) or prototypes["BODY"]
+    source = prototypes.get(key)
+    if source is None:
+        source = prototypes["BODY"]
     element = deepcopy(source)
     rpr = _first_rpr(element)
     _clean_paragraph(element)
@@ -212,6 +214,9 @@ def _draw_skill(doc, prototypes, block: Block) -> None:
     if header:
         rows.pop(0)
     table = _new_table(doc, prototypes, "SKILL", header=header, count=len(rows))
+    if header:
+        _fill_cell(table.cell(0, 0), block.rows[0][0])
+        _fill_cell(table.cell(0, 1), block.rows[0][1])
     for ri, cells in enumerate(rows, start=int(header)):
         for ci in range(min(2, len(cells))):
             _fill_cell(table.cell(ri, ci), cells[ci])
@@ -256,7 +261,7 @@ def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc) -
         if block.kind == "list" and tasks and not block.ordered:
             raw = _text(spans)
             spans = (Span("・" if not raw.startswith("・") else ""),) + spans
-            para.style = doc.styles["Normal"]
+            # This is literal typography, never a native List Bullet.
         elif block.kind == "list":
             _native_list(para, block, list_ids, doc)
         elif _in_tasks_heading(block):
@@ -271,6 +276,8 @@ def _draw_roles(doc, prototypes, roles: list[tuple[Block, list[Block]]], list_id
     if not roles:
         return
     table = _new_table(doc, prototypes, "ROLE", header=True, count=len(roles))
+    _fill_cell(table.cell(0, 0), (Span("職種・期間"),))
+    _fill_cell(table.cell(0, 1), (Span("身につけた能力／経験・主な業務"),))
     for index, (role, items) in enumerate(roles, 1):
         row = table.rows[index]
         _fill_cell(row.cells[0], role.spans)
@@ -300,8 +307,10 @@ def _draw_general_table(doc, block: Block) -> None:
     # Generic Markdown tables keep the existing implementation and mechanics.
     from .docx_renderer import _draw_table
     _draw_table(doc, block)
-    # In résumé mode, the font comes from the approved template, not the
-    # generic renderer's hard-coded Yu Gothic.
+    # For generic Markdown tables use the existing table algorithm, but the
+    # typography must inherit the approved template's Normal style.
+    normal = doc.styles["Normal"]
+    default_fonts = normal.element.get_or_add_rPr().find(qn("w:rFonts"))
     for cell in doc.tables[-1]._cells:
         for para in cell.paragraphs:
             for run in para.runs:
@@ -311,7 +320,11 @@ def _draw_general_table(doc, block: Block) -> None:
                     fonts = OxmlElement("w:rFonts")
                     rpr.insert(0, fonts)
                 for attr in ("ascii", "hAnsi", "eastAsia", "cs"):
-                    fonts.set(qn("w:" + attr), "Meiryo UI")
+                    specified = default_fonts.get(qn("w:" + attr)) if default_fonts is not None else None
+                    if specified:
+                        fonts.set(qn("w:" + attr), specified)
+                    else:
+                        fonts.attrib.pop(qn("w:" + attr), None)
 
 
 def _draw_block(doc, paragraphs, tables, block: Block, list_ids, *, tasks=False):
