@@ -428,6 +428,58 @@ def _emphasize_ability_label(spans: tuple[Span, ...]) -> tuple[Span, ...]:
     return tuple(result)
 
 
+def _is_repeated_role_header(block: Block) -> bool:
+    """Suppress only the duplicated fixed label, never candidate prose."""
+    if block.kind not in ("heading", "paragraph"):
+        return False
+    label = re.sub(r"\s+", "", _text(block.spans))
+    return label in (
+        "職種・期間と身につけた能力／経験・主な業務",
+        "職種・期間／身につけた能力／経験・主な業務",
+    )
+
+
+def _break_role_period(spans: tuple[Span, ...]) -> tuple[Span, ...]:
+    """Split the trailing period without losing per-span Markdown formatting."""
+    text = _text(spans)
+    match = re.search(
+        r"（\d{4}年\s*\d{1,2}月\s*[～〜－-]\s*(?:現在|\d{4}年\s*\d{1,2}月)）$",
+        text,
+    )
+    if not match or match.start() == 0 or text[match.start() - 1] == "\n":
+        return spans
+    offset = match.start()
+    output = []
+    for span in spans:
+        length = len(span.text)
+        if 0 < offset < length:
+            output.append(replace(span, text=span.text[:offset]))
+            output.append(replace(span, text="\n" + span.text[offset:]))
+        elif offset == 0:
+            output.append(replace(span, text="\n" + span.text))
+        else:
+            output.append(span)
+        offset -= length
+    return tuple(output)
+
+
+def _emphasize_ability_label(spans: tuple[Span, ...]) -> tuple[Span, ...]:
+    """Emphasize only the opening label and preserve the original text."""
+    match = re.match(r"^(?:身につけた能力|身につけたスキル)[：:]", _text(spans))
+    if not match:
+        return spans
+    remaining = match.end()
+    output = []
+    for span in spans:
+        take = min(remaining, len(span.text))
+        if take:
+            output.append(replace(span, text=span.text[:take], bold=True))
+        if take < len(span.text):
+            output.append(replace(span, text=span.text[take:]))
+        remaining -= take
+    return tuple(output)
+
+
 def _keep_compact_role(left: tuple[Span, ...], entries: list[Block]) -> bool:
     """Keep a handful of short paragraphs; let Word split lengthy role rows."""
     values = [_text(b.spans) for b in entries]
@@ -440,7 +492,7 @@ def _keep_compact_role(left: tuple[Span, ...], entries: list[Block]) -> bool:
 
 
 def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc) -> None:
-    # Use the template's separate samples for narrative, subheading and tasks.
+    # Separate paragraph exemplars for narrative text, task headings and bullets.
     source = [deepcopy(p._p) for p in cell.paragraphs]
     if len(source) < 3:
         raise ConversionError("Wordテンプレートの職務内容書式が不足しています。")
@@ -473,7 +525,6 @@ def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc) -
         if literal_bullet:
             if not _text(spans).startswith("・"):
                 spans = (Span("・"),) + spans
-            # A literal bullet and Word numbering must not coexist.
             if para.style.name.startswith("List "):
                 para.style = doc.styles["Normal"]
         elif block.kind == "list":
@@ -486,7 +537,8 @@ def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc) -
         para.paragraph_format.keep_with_next = subheading
         para.paragraph_format.keep_together = subheading
         para.paragraph_format.widow_control = True
-        _append_spans(para, spans, rpr, size=9)
+        _append_spans(para, spans, rpr, size=9,
+                      bold=True if subheading else False if block.kind == "paragraph" else None)
     if not entries:
         element = deepcopy(source[0])
         _clean_paragraph(element)
@@ -496,7 +548,7 @@ def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc) -
 def _draw_roles(doc, prototypes, roles: list[tuple[Block, list[Block]]], list_ids) -> None:
     if not roles:
         return
-    # The approved Word uses one table header, regardless of source labels.
+    # The ideal Word includes a genuine header; remove only duplicate labels.
     table = _new_table(doc, prototypes, "ROLE", header=True, count=len(roles))
     _fill_cell(table.cell(0, 0), (Span("職種・期間"),), size=9.5, bold=True)
     _fill_cell(table.cell(0, 1), (Span("身につけた能力／経験・主な業務"),), size=9.5, bold=True)
@@ -512,7 +564,6 @@ def _draw_roles(doc, prototypes, roles: list[tuple[Block, list[Block]]], list_id
             detail_items = items[1:]
         _fill_cell(row.cells[0], left_spans, size=9.5, bold=True)
         _write_cell_job(row.cells[1], detail_items, list_ids, doc)
-        # A long row can cross pages; short rows stay together.
         _row_flag(row, "cantSplit", _keep_compact_role(left_spans, detail_items))
 
 
@@ -613,6 +664,8 @@ def _work_after_company(doc, paragraphs, tables, blocks: tuple[Block, ...], list
 
     for index, block in enumerate(blocks):
         following = blocks[index + 1] if index + 1 < len(blocks) else None
+        if _is_repeated_role_header(block):
+            continue
         if _is_repeated_role_header(block):
             continue
         if _is_role(block, first=not roles, following=following):
