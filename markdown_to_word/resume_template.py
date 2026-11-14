@@ -6,6 +6,7 @@ module deliberately does not reconstruct or approximate missing styles.
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import date
 from dataclasses import replace
 from pathlib import Path
 import re
@@ -840,6 +841,26 @@ def _format_page_fields(doc) -> None:
                 run.font.color.rgb = RGBColor(0x6E, 0x6E, 0x6E)
 
 
+def _local_today() -> date:
+    """Read the operating system's local calendar day once per Word document."""
+    return date.today()
+
+
+def _with_creation_date(blocks: tuple[Block, ...]) -> tuple[Block, ...]:
+    """Prepare a new leading DATE block without modifying ParsedDocument."""
+    today = _local_today()
+    creation_date = Block(
+        "meta_date", (Span(f"{today.year}年{today.month}月{today.day}日現在"),)
+    )
+    end = 0
+    while end < len(blocks) and blocks[end].kind in ("meta_title", "meta_date", "meta_name"):
+        end += 1
+    intro = [block for block in blocks[:end] if block.kind != "meta_date"]
+    titles = [block for block in intro if block.kind == "meta_title"]
+    names = [block for block in intro if block.kind == "meta_name"]
+    return tuple(titles + [creation_date] + names) + blocks[end:]
+
+
 def render_resume(parsed: ParsedDocument):
     """Build a résumé from Markdown while cloning original DOCX formatting.
 
@@ -853,7 +874,7 @@ def render_resume(parsed: ParsedDocument):
     section_paragraph_count = 0
     episode_active = False
     episode_paragraph_count = 0
-    blocks = parsed.blocks
+    blocks = _with_creation_date(parsed.blocks)
     i = 0
     while i < len(blocks):
         block = blocks[i]
