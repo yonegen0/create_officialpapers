@@ -38,6 +38,7 @@ class Controller:
 
     def _error(self, exc: BaseException) -> None:
         self.view.set_status("エラーが発生しました")
+        self.view.mark_previous_output()
         dialogs.error("処理できませんでした", str(exc), self.view.root)
 
     def invalidate(self, *args) -> None:
@@ -100,6 +101,7 @@ class Controller:
                 choice = dialogs.conflict(self.view.root, path)
                 if choice == "cancel":
                     self.view.set_status("保存をキャンセルしました")
+                    self.view.mark_previous_output()
                     return
                 if choice == "rename":
                     path = numbered_path(path)
