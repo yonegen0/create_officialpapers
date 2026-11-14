@@ -80,6 +80,8 @@ class Controller:
     def generate(self) -> None:
         if self.busy:
             return
+        # A new attempt is not a new success; preserve only the previous file link.
+        self.view.mark_previous_output()
         if self.preview is None:
             dialogs.info("事前確認", "先に「事前確認」を実行してください。", self.view.root)
             return
