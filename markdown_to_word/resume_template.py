@@ -231,12 +231,13 @@ def _is_role(block: Block) -> bool:
     if block.kind != "heading" or block.level < 2:
         return False
     content = _text(block.spans).strip()
-    return bool(content and not content.startswith(("■", "【", "①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩")))
+    return bool(content and not content.startswith(("■", "【")) and not ("①" <= content[0] <= "⑳"))
 
 
 def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc) -> None:
     source = cell.paragraphs[0]._p
     body_rpr = _first_rpr(source)
+    pristine = deepcopy(source)
     _fill_cell(cell, ())
     # The first description line retains the original template cell spacing.
     first = True
@@ -253,7 +254,7 @@ def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc) -
             para = cell.paragraphs[0]
             first = False
         else:
-            element = deepcopy(source)
+            element = deepcopy(pristine)
             _clean_paragraph(element)
             cell._tc.append(element)
             para = Paragraph(element, cell)
@@ -357,6 +358,9 @@ def _draw_block(doc, paragraphs, tables, block: Block, list_ids, *, tasks=False)
     if block.kind == "rule":
         from .docx_renderer import _rule
         _rule(p)
+    if block.kind == "code":
+        for run in p.runs:
+            run.font.name = "Consolas"
 
 
 def _work_after_company(doc, paragraphs, tables, blocks: tuple[Block, ...], list_ids) -> None:
