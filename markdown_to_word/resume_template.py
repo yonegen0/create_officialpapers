@@ -309,8 +309,6 @@ def _draw_general_table(doc, block: Block) -> None:
     _draw_table(doc, block)
     # For generic Markdown tables use the existing table algorithm, but the
     # typography must inherit the approved template's Normal style.
-    normal = doc.styles["Normal"]
-    default_fonts = normal.element.get_or_add_rPr().find(qn("w:rFonts"))
     for cell in doc.tables[-1]._cells:
         for para in cell.paragraphs:
             for run in para.runs:
@@ -320,11 +318,9 @@ def _draw_general_table(doc, block: Block) -> None:
                     fonts = OxmlElement("w:rFonts")
                     rpr.insert(0, fonts)
                 for attr in ("ascii", "hAnsi", "eastAsia", "cs"):
-                    specified = default_fonts.get(qn("w:" + attr)) if default_fonts is not None else None
-                    if specified:
-                        fonts.set(qn("w:" + attr), specified)
-                    else:
-                        fonts.attrib.pop(qn("w:" + attr), None)
+                    # The ideal Word explicitly uses Meiryo UI on its runs;
+                    # its Normal style has a different fallback font.
+                    fonts.set(qn("w:" + attr), "Meiryo UI")
 
 
 def _draw_block(doc, paragraphs, tables, block: Block, list_ids, *, tasks=False):
