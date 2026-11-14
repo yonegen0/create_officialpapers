@@ -284,8 +284,8 @@ def test_resume_purpose_specific_format_and_periods(tmp_path):
     assert [p.text for p in descriptions[-2:]] == ["・来客対応", "・予約管理"]
 
     strong = next(i for i, p in enumerate(doc.paragraphs) if p.text == "初めの説明です。")
-    assert all(r.bold for r in doc.paragraphs[strong].runs if r.text)
-    assert all(not r.bold for r in doc.paragraphs[strong + 1].runs if r.text)
+    assert all(r.bold is False for r in doc.paragraphs[strong].runs if r.text)
+    assert all(r.bold is False for r in doc.paragraphs[strong + 1].runs if r.text)
     assert doc.paragraphs[strong + 1].paragraph_format.first_line_indent.pt == 10.5
 
     assert skills.cell(0, 0).paragraphs[0].runs[0].font.size.pt == 9.5
@@ -323,3 +323,22 @@ def test_template_rpr_selector_and_unwanted_role_labels(sample_template):
     assert roles.cell(1, 1).paragraphs[0].runs[0].font.size.pt == 9
     assert [p.text for p in roles.cell(1, 1).paragraphs][-1] == "・電話対応"
     assert "職種・期間と身につけた能力" not in "\n".join(p.text for p in doc.paragraphs)
+
+
+def test_resume_body_markdown_bold_is_ignored(sample_template):
+    source = (
+        "■ 職務要約\n\n通常の**強調**本文です。\n\n"
+        "■ 職務経歴\n\n勤務先\t架空A\n在籍期間\t2023年～現在\n\n"
+        "### 営業\n\n業務の**強調**説明です。\n\n"
+        "【主な業務】\n\n- **来客**対応\n\n"
+        "■ 主な経験・強み\n\n① 成果\n\n**冒頭**も通常の太さです。"
+    )
+    doc = render_docx(parse_markdown(source))
+    summary = next(p for p in doc.paragraphs if "通常の強調本文" in p.text)
+    episode = next(p for p in doc.paragraphs if "冒頭も通常の太さ" in p.text)
+    detail = doc.tables[1].cell(1, 1).paragraphs
+    for para in (summary, episode, *detail):
+        if para.text == "【主な業務】":
+            continue
+        assert all(run.bold is False for run in para.runs if run.text), para.text
+    assert any(run.bold for run in doc.tables[1].cell(0, 0).paragraphs[0].runs)
