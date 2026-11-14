@@ -560,12 +560,15 @@ def test_circled_experience_headings_remove_editing_margin_flags(sample_template
     from docx.shared import Pt
 
     template = Document(sample_template)
-    exemplar = next(p for p in template.paragraphs if p.text == "{{MTW_HEADING2}}")
-    exemplar.paragraph_format.keep_with_next = True
-    exemplar.paragraph_format.keep_together = True
-    exemplar.paragraph_format.widow_control = True
-    exemplar.add_run("見本").font.size = Pt(11)
-    exemplar.runs[0].bold = True
+    # The bundled fixture uses HEADING2 only; cover ### (HEADING3) too.
+    template.add_paragraph("{{MTW_HEADING3}}")
+    for key in ("HEADING2", "HEADING3"):
+        exemplar = next(p for p in template.paragraphs if p.text == "{{MTW_" + key + "}}")
+        exemplar.paragraph_format.keep_with_next = True
+        exemplar.paragraph_format.keep_together = True
+        exemplar.paragraph_format.widow_control = True
+        exemplar.runs[0].font.size = Pt(11)
+        exemplar.runs[0].bold = True
     template.save(sample_template)
 
     source = (
