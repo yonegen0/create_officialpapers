@@ -37,6 +37,8 @@ def test_input_modes_preserve_text_and_file_selection(tmp_path, monkeypatch):
 def test_gui_preview_generate_busy_and_success(tmp_path):
     root, view = _window()
     try:
+        # This test covers GUI save flow, independent of the separate resume asset.
+        view.style.set("標準文書")
         view.input_mode.set("paste")
         view.input_text.insert("1.0", "# 見出し\n\n本文です。")
         view.output_name.set("出力.docx")
