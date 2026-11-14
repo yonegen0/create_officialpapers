@@ -15,6 +15,8 @@ import markdown_to_word.resume_template as resume
 def sample_template(tmp_path, monkeypatch):
     """Synthetic contract fixture only; never shipped as the visual template."""
     doc = Document()
+    doc.sections[0].page_width = Mm(210)
+    doc.sections[0].page_height = Mm(297)
     normal = doc.styles["Normal"]
     normal.font.name = "Meiryo UI"
     rfonts = normal.element.get_or_add_rPr().find(qn("w:rFonts"))
