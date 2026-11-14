@@ -353,7 +353,7 @@ def _is_role(block: Block, *, first: bool, following: Block | None) -> bool:
     if label.endswith(("こと", "方法", "理由", "ポイント", "取り組み", "経験",
                        "成果", "実績", "能力", "スキル", "課題")):
         return False
-    return bool(_ROLE_HINT.search(label))
+    return first or bool(_ROLE_HINT.search(label))
 
 
 def _display_role_spans(spans: tuple[Span, ...]) -> tuple[Span, ...]:
@@ -374,58 +374,6 @@ def _display_role_spans(spans: tuple[Span, ...]) -> tuple[Span, ...]:
             converted.append(Span(value, span.bold, span.italic, span.link,
                                   span.code, span.break_line))
     return tuple(converted)
-
-
-def _is_repeated_role_header(block: Block) -> bool:
-    """Discard only the redundant fixed role-table label."""
-    if block.kind not in ("heading", "paragraph"):
-        return False
-    label = re.sub(r"\s+", "", _text(block.spans))
-    return label in (
-        "職種・期間と身につけた能力／経験・主な業務",
-        "職種・期間／身につけた能力／経験・主な業務",
-    )
-
-
-def _break_role_period(spans: tuple[Span, ...]) -> tuple[Span, ...]:
-    """Put a trailing parenthesized period on a new line across Markdown spans."""
-    full = _text(spans)
-    match = re.search(
-        r"（\d{4}年\s*\d{1,2}月\s*[～〜－-]\s*(?:現在|\d{4}年\s*\d{1,2}月)）$",
-        full,
-    )
-    if not match or match.start() == 0 or full[match.start() - 1] == "\n":
-        return spans
-    offset = match.start()
-    result: list[Span] = []
-    for span in spans:
-        size = len(span.text)
-        if 0 < offset < size:
-            result.append(replace(span, text=span.text[:offset]))
-            result.append(replace(span, text="\n" + span.text[offset:]))
-        elif offset == 0:
-            result.append(replace(span, text="\n" + span.text))
-        else:
-            result.append(span)
-        offset -= size
-    return tuple(result)
-
-
-def _emphasize_ability_label(spans: tuple[Span, ...]) -> tuple[Span, ...]:
-    """Bold only the label; preserve every source character."""
-    match = re.match(r"^(?:身につけた能力|身につけたスキル)[：:]", _text(spans))
-    if match is None:
-        return spans
-    remaining = match.end()
-    result: list[Span] = []
-    for span in spans:
-        take = min(remaining, len(span.text))
-        if take:
-            result.append(replace(span, text=span.text[:take], bold=True))
-        if take < len(span.text):
-            result.append(replace(span, text=span.text[take:]))
-        remaining -= take
-    return tuple(result)
 
 
 def _is_repeated_role_header(block: Block) -> bool:
@@ -664,8 +612,6 @@ def _work_after_company(doc, paragraphs, tables, blocks: tuple[Block, ...], list
 
     for index, block in enumerate(blocks):
         following = blocks[index + 1] if index + 1 < len(blocks) else None
-        if _is_repeated_role_header(block):
-            continue
         if _is_repeated_role_header(block):
             continue
         if _is_role(block, first=not roles, following=following):
