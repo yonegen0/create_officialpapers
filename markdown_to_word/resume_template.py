@@ -490,7 +490,7 @@ def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc) -
         para.paragraph_format.keep_together = subheading
         para.paragraph_format.widow_control = True
         _append_spans(para, spans, rpr, size=9,
-                      bold=True if subheading else False if block.kind == "paragraph" else None)
+                      bold=True if subheading else False if block.kind in ("paragraph", "list") else None)
     if not entries:
         element = deepcopy(source[0])
         _clean_paragraph(element)
