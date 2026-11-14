@@ -482,3 +482,39 @@ def test_history_table_layout_has_consistent_grid_borders_and_bullets(sample_tem
                for p in bullets)
     assert sum(cell.paragraphs[-1].paragraph_format.keep_with_next is True
                for row in doc.tables[0].rows for cell in row.cells) == 2
+
+
+def test_resume_clears_inherited_body_page_controls(sample_template):
+    """Template paragraph flags must not force ordinary copy onto new pages."""
+    sample = Document(sample_template)
+    for paragraph in sample.paragraphs:
+        if paragraph.text == "{{MTW_BODY}}":
+            paragraph.paragraph_format.keep_with_next = True
+            paragraph.paragraph_format.keep_together = True
+            paragraph.paragraph_format.page_break_before = True
+            break
+    sample.save(sample_template)
+
+    source = (
+        "■ 職務要約\n\n短い本文です。\n\n" +
+        "長い本文です。" * 30 + "\n\n"
+        "■ 職務経歴\n\n勤務先\t架空A\n在籍期間\t2023年～現在\n"
+        "事業内容\t" + "長い会社説明です。" * 30 + "\n\n"
+        "### 受付\n\n通常の説明です。"
+    )
+    doc = render_docx(parse_markdown(source))
+    short = next(p for p in doc.paragraphs if p.text == "短い本文です。")
+    long = next(p for p in doc.paragraphs if p.text.startswith("長い本文です。"))
+    for para in (short, long):
+        assert para.paragraph_format.page_break_before is None
+        assert para.paragraph_format.keep_with_next is False
+        assert para.paragraph_format.keep_together is not True
+        assert para.paragraph_format.space_before.pt == 0
+        assert para.paragraph_format.space_after.pt == 0
+        assert all(run.bold is False for run in para.runs if run.text)
+    company = doc.tables[0]
+    assert company.cell(2, 1).paragraphs[0].paragraph_format.keep_together is False
+    assert not _has_row_flag(company.rows[2], "cantSplit")
+    assert all(c.paragraphs[-1].paragraph_format.keep_with_next is not True
+               for row in company.rows for c in row.cells)
+    assert doc.tables[1].cell(1, 0).text == "受付"

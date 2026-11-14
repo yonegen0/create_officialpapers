@@ -153,7 +153,7 @@ def _append_spans(para: Paragraph, spans: tuple[Span, ...], prototype_rpr,
                     run.add_text(part)
 
 
-def _clean_paragraph(element) -> None:
+def _clean_paragraph(element, *, plain_body: bool = False) -> None:
     for child in list(element):
         if child.tag != qn("w:pPr"):
             element.remove(child)
@@ -162,7 +162,9 @@ def _clean_paragraph(element) -> None:
         # The exemplar's numbering and manual breaks are not source text.
         # _native_list() reintroduces numbering for Markdown lists.
         for child in list(ppr):
-            if child.tag in (qn("w:pageBreakBefore"), qn("w:numPr")):
+            if child.tag in (qn("w:pageBreakBefore"), qn("w:numPr")) or (
+                plain_body and child.tag in (qn("w:keepNext"), qn("w:keepLines"))
+            ):
                 ppr.remove(child)
 
 
@@ -196,7 +198,7 @@ def _new_paragraph(doc, prototypes, key: str, spans: tuple[Span, ...], *,
         source = prototypes["BODY"]
     element = deepcopy(source)
     rpr = _sample_rpr(element, normal=(key == "BODY"))
-    _clean_paragraph(element)
+    _clean_paragraph(element, plain_body=(key == "BODY"))
     doc.element.body.insert_element_before(element, "w:sectPr")
     para = Paragraph(element, doc._body)
     _append_spans(para, spans, rpr, size=size, bold=bold)
@@ -361,9 +363,16 @@ def _draw_company(doc, prototypes, block: Block) -> None:
         # cantSplit keeps a short row together. Only the end-of-row paragraph
         # needs keepNext to link it to the next row; two copies are redundant.
         for ci, cell in enumerate(table.rows[ri].cells):
-            cell.paragraphs[-1].paragraph_format.keep_with_next = (
+            paragraph = cell.paragraphs[-1]
+            paragraph.paragraph_format.keep_with_next = (
                 True if compact_table and ci == 1 and ri < len(rows) - 1 else None
             )
+            # A lengthy company value must not inherit keepLines from the
+            # short template sample when its row is allowed to split.
+            if ci < len(cells):
+                value = _text(cells[ci])
+                if len(value) > 110 or "\n" in value:
+                    paragraph.paragraph_format.keep_together = False
     _style_history_table(table, doc, company=True)
 
 
