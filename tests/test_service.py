@@ -137,3 +137,30 @@ def test_batch_save_race_retries_numbered_path(tmp_path, monkeypatch):
     result = batch.convert_batch(items, "標準文書", tmp_path)
     assert [p.name for p in result.saved] == ["競合 (1).docx"]
     assert (tmp_path / "競合.docx").read_bytes() == b"other-writer"
+
+
+def test_resume_date_is_set_at_conversion_for_paste_and_four_batch_files(tmp_path, monkeypatch):
+    from datetime import date
+    from markdown_to_word.batch import prepare_batch, convert_batch
+    import markdown_to_word.resume_template as resume
+
+    source = "# 職務経歴書\n\n2026年10月31日現在\n\n氏名：架空 花子\n\n■ 職務要約\n\n本文です。"
+    preview = prepare(source, "職務経歴書", "paste")
+    paths = tuple(tmp_path / f"企業{i}.md" for i in range(4))
+    for path in paths:
+        path.write_text(source, encoding="utf-8")
+    items = prepare_batch(paths, "職務経歴書")
+
+    # Preview may have happened on the previous day; only render reads today.
+    monkeypatch.setattr(resume, "_local_today", lambda: date(2026, 11, 15))
+    target = tmp_path / "貼り付け.docx"
+    convert(preview, source, "職務経歴書", "paste", target, replace=False)
+    assert [p.text for p in Document(target).paragraphs[:3]] == [
+        "職務経歴書", "2026年11月15日現在", "氏名：架空 花子"
+    ]
+    result = convert_batch(items, "職務経歴書", tmp_path)
+    assert len(result.saved) == 4 and not result.failures
+    for output in result.saved:
+        assert [p.text for p in Document(output).paragraphs[:3]] == [
+            "職務経歴書", "2026年11月15日現在", "氏名：架空 花子"
+        ]

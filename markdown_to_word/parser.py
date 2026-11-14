@@ -17,7 +17,7 @@ _ROLE_PERIOD = re.compile(r"^[^（）\n]{2,40}（\d{4}年\d{1,2}月\s*[～〜－
 _SECTION = re.compile(r"^■\s*\S")
 _CIRCLED = re.compile(r"^[①-⑳]\s*\S")
 _BRACKET = re.compile(r"^【[^】]+】$")
-_DATE = re.compile(r"^\d{4}年\d{1,2}月\d{1,2}日現在$")
+_DATE = re.compile(r"^\d{4}年\d{1,2}月(?:\d{1,2}日)?現在$")
 _NAME = re.compile(r"^氏名[：:]\s*\S")
 _KV_KEYS = ("勤務先", "在籍期間", "雇用形態", "事業内容", "会社規模")
 _HEADER_KEYS = (("項目", "内容"), ("経験・能力", "内容"))
@@ -215,6 +215,73 @@ def _plain(spans: Sequence[Span]) -> str:
     return "".join(s.text for s in spans)
 
 
+def _intro_kind(block: Block) -> str | None:
+    """Classify only standalone résumé metadata at the document opening."""
+    if block.kind in ("meta_title", "meta_date", "meta_name"):
+        return block.kind
+    text = _plain(block.spans).strip()
+    if "\n" in text:
+        return None
+    if block.kind == "paragraph":
+        if text == "職務経歴書":
+            return "meta_title"
+        if _DATE.fullmatch(text):
+            return "meta_date"
+        if _NAME.match(text):
+            return "meta_name"
+    if block.kind == "heading" and block.level == 1 and text == "職務経歴書":
+        return "meta_title"
+    return None
+
+
+def _split_intro_lines(block: Block) -> tuple[Block, ...]:
+    """Handle standalone metadata lines even without blank Markdown separators.
+
+    Split a soft-wrapped paragraph only when every line is unambiguously
+    metadata, optionally followed by one section heading. Ordinary prose is
+    never split or reordered.
+    """
+    if block.kind != "paragraph" or not any(span.break_line for span in block.spans):
+        return (block,)
+    lines: list[list[Span]] = [[]]
+    for span in block.spans:
+        if span.break_line:
+            lines.append([])
+        else:
+            lines[-1].append(span)
+    if any(not line for line in lines):
+        return (block,)
+    values = [_plain(line).strip() for line in lines]
+    if not all(
+        value == "職務経歴書" or _DATE.fullmatch(value) or _NAME.match(value)
+        or (index == len(values) - 1 and _SECTION.match(value))
+        for index, value in enumerate(values)
+    ):
+        return (block,)
+    return tuple(
+        Block("heading" if index == len(lines) - 1 and _SECTION.match(values[index])
+              else "paragraph", tuple(line),
+              level=1 if index == len(lines) - 1 and _SECTION.match(values[index]) else 0)
+        for index, line in enumerate(lines)
+    )
+
+
+def _normalize_resume_intro(blocks: list[Block]) -> list[Block]:
+    """Only the continuous leading metadata region can contain creation dates."""
+    normalized: list[Block] = []
+    in_intro = True
+    for block in blocks:
+        pieces = _split_intro_lines(block) if in_intro else (block,)
+        for piece in pieces:
+            kind = _intro_kind(piece) if in_intro else None
+            if kind is not None:
+                normalized.append(Block(kind, piece.spans))
+            else:
+                in_intro = False
+                normalized.append(piece)
+    return normalized
+
+
 def parse_markdown(source: str, style: str = "職務経歴書") -> ParsedDocument:
     if style not in ("職務経歴書", "標準文書"):
         raise ConversionError("文書スタイルを選択してください。")
@@ -283,10 +350,6 @@ def parse_markdown(source: str, style: str = "職務経歴書") -> ParsedDocumen
                 blocks.append(Block("heading", spans, level=2))
             elif style == "職務経歴書" and text == "職務経歴書" and not blocks:
                 blocks.append(Block("meta_title", spans))
-            elif style == "職務経歴書" and len(blocks) <= 2 and all(b.kind in ("meta_title", "meta_date", "meta_name") for b in blocks) and _DATE.fullmatch(text):
-                blocks.append(Block("meta_date", spans))
-            elif style == "職務経歴書" and len(blocks) <= 2 and all(b.kind in ("meta_title", "meta_date", "meta_name") for b in blocks) and _NAME.match(text):
-                blocks.append(Block("meta_name", spans))
             else:
                 blocks.append(Block("paragraph", spans))
             i += 3
@@ -329,6 +392,13 @@ def parse_markdown(source: str, style: str = "職務経歴書") -> ParsedDocumen
             warnings.append("HTMLは実行せず、文字列として出力します。")
             blocks.append(Block("code", (Span(tok.content),)))
         i += 1
+    if style == "職務経歴書":
+        # Normalize metadata without changing the source or the original counters.
+        characters_before_normalization = sum(len(s.text) for b in blocks for s in b.spans)
+        characters_before_normalization += sum(
+            len(s.text) for b in blocks for row in b.rows for cell in row for s in cell
+        )
+        blocks = _normalize_resume_intro(blocks)
     if not blocks:
         raise ConversionError("変換できる本文がありません。")
     if style == "職務経歴書" and blocks[-1].kind == "paragraph" and _plain(blocks[-1].spans).strip() == "以上":
@@ -339,8 +409,11 @@ def parse_markdown(source: str, style: str = "職務経歴書") -> ParsedDocumen
     if any(child.type == "image" for token in image_tokens for child in (token.children or [])):
         warnings.append("画像は埋め込まず、Markdown記法の文字列として保持します。")
     # The public counter tracks visible content characters; never count markup.
-    char_count = sum(len(s.text) for b in blocks for s in b.spans)
-    char_count += sum(len(s.text) for b in blocks for row in b.rows for cell in row for s in cell)
+    if style == "職務経歴書":
+        char_count = characters_before_normalization
+    else:
+        char_count = sum(len(s.text) for b in blocks for s in b.spans)
+        char_count += sum(len(s.text) for b in blocks for row in b.rows for cell in row for s in cell)
     for b in blocks:
         if b.kind == "table" and any(len(row) != len(b.rows[0]) for row in b.rows):
             warnings.append("列数が異なる表があります。")

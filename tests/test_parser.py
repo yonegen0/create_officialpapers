@@ -151,3 +151,46 @@ def test_tabular_image_reference_is_preserved_and_warned():
     code = parse_markdown("項目\t内容\nコード\t" + "`![ロゴ](logo.png)`")
     assert code.tables == 1
     assert not any("画像" in warning for warning in code.warnings)
+
+
+def test_resume_intro_month_only_duplicates_and_soft_break_lines():
+    source = (
+        "# 職務経歴書\n2026年10月31日現在\n氏名：架空 花子\n"
+        "2026年11月現在\n■ 職務要約\n\n本文です。"
+    )
+    parsed = parse_markdown(source)
+    assert [b.kind for b in parsed.blocks[:5]] == [
+        "meta_title", "meta_date", "meta_name", "meta_date", "heading"
+    ]
+    assert [plain(b) for b in parsed.blocks[1:4]] == [
+        "2026年10月31日現在", "氏名：架空 花子", "2026年11月現在"
+    ]
+    assert plain(parsed.blocks[-1]) == "本文です。"
+
+
+def test_resume_intro_title_after_date_and_body_date_scope():
+    source = (
+        "2026年10月現在\n\n# 職務経歴書\n\n氏名：架空 花子\n\n"
+        "■ 職務要約\n\n2024年1月現在\n\n"
+        "- 2023年5月現在\n\n```\n2025年6月現在\n```\n\n"
+        "| 時点 | 内容 |\n|---|---|\n| 2022年9月現在 | 変更なし |"
+    )
+    parsed = parse_markdown(source)
+    assert [b.kind for b in parsed.blocks[:4]] == [
+        "meta_date", "meta_title", "meta_name", "heading"
+    ]
+    assert parsed.blocks[4].kind == "paragraph"
+    assert plain(parsed.blocks[4]) == "2024年1月現在"
+    assert any(b.kind == "list" and plain(b) == "2023年5月現在" for b in parsed.blocks)
+    assert any(b.kind == "code" and "2025年6月現在" in plain(b) for b in parsed.blocks)
+    assert parsed.blocks[-1].kind == "table"
+    assert parsed.blocks[-1].rows[1][0][0].text == "2022年9月現在"
+    assert all(b.kind not in ("meta_date", "meta_name", "meta_title") for b in parsed.blocks[3:])
+    standard = parse_markdown("2026年10月現在\n\n氏名：架空 花子", "標準文書")
+    assert [b.kind for b in standard.blocks] == ["paragraph", "paragraph"]
+
+
+def test_resume_intro_does_not_cross_ordinary_prose():
+    parsed = parse_markdown("職務経歴書\n\n説明文です。\n\n2026年10月現在")
+    assert [b.kind for b in parsed.blocks] == ["meta_title", "paragraph", "paragraph"]
+    assert plain(parsed.blocks[-1]) == "2026年10月現在"

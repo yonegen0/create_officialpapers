@@ -553,3 +553,46 @@ def test_resume_clears_inherited_body_page_controls(sample_template):
     assert all(c.paragraphs[-1].paragraph_format.keep_with_next is not True
                for row in company.rows for c in row.cells)
     assert doc.tables[1].cell(1, 0).text == "受付"
+
+
+def test_resume_creation_date_replaces_duplicates_and_preserves_body(sample_template, monkeypatch):
+    from datetime import date
+
+    monkeypatch.setattr(resume, "_local_today", lambda: date(2026, 11, 14))
+    source = (
+        "2026年10月31日現在\n\n# 職務経歴書\n\n氏名：架空 花子\n\n"
+        "2026年11月現在\n\n■ 職務要約\n\n2024年1月現在\n\n"
+        "■ 職務経歴\n\n勤務先\t架空会社\n在籍期間\t2021年4月～現在"
+    )
+    parsed = parse_markdown(source)
+    before = parsed.blocks
+    doc = render_docx(parsed)
+    assert parsed.blocks == before
+    assert [p.text for p in doc.paragraphs[:5]] == [
+        "職務経歴書", "2026年11月14日現在", "氏名：架空 花子",
+        "■ 職務要約", "2024年1月現在"
+    ]
+    assert doc.paragraphs[1].alignment == WD_ALIGN_PARAGRAPH.RIGHT
+    assert "w:instrText" not in doc.paragraphs[1]._p.xml
+    assert sum(p.text == "2026年11月14日現在" for p in doc.paragraphs) == 1
+    assert "2026年10月31日現在" not in [p.text for p in doc.paragraphs]
+    assert doc.tables[0].cell(1, 1).text == "2021年4月～現在"
+
+
+def test_resume_creation_date_added_when_missing_title_or_name(sample_template, monkeypatch):
+    from datetime import date
+
+    monkeypatch.setattr(resume, "_local_today", lambda: date(2026, 11, 14))
+    doc = render_docx(parse_markdown("■ 職務要約\n\n本文です。"))
+    assert [p.text for p in doc.paragraphs] == [
+        "2026年11月14日現在", "■ 職務要約", "本文です。"
+    ]
+    assert doc.paragraphs[0].alignment == WD_ALIGN_PARAGRAPH.RIGHT
+
+
+def test_standard_document_keeps_date_and_does_not_insert(sample_template, monkeypatch):
+    from datetime import date
+
+    monkeypatch.setattr(resume, "_local_today", lambda: date(2026, 11, 14))
+    doc = render_docx(parse_markdown("2026年10月現在\n\n本文です。", "標準文書"))
+    assert [p.text for p in doc.paragraphs] == ["2026年10月現在", "本文です。"]
