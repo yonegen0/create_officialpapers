@@ -235,3 +235,91 @@ def test_resume_row_break_controls(sample_template):
     assert not _has_row_flag(skills.rows[2], "cantSplit")
     heading = next(p for p in roles.cell(2, 1).paragraphs if p.text == "工夫した点")
     assert heading.paragraph_format.keep_with_next
+
+
+def test_resume_purpose_specific_format_and_periods(tmp_path):
+    """Roundtrip the real template, not just synthetic styles."""
+    source = (
+        "職務経歴書\n\n2026年11月14日現在\n\n氏名：架空 花子\n\n"
+        "■ 職務要約\n\n最初の段落です。\n\n次の段落です。\n\n"
+        "■ 職務経歴\n\n"
+        "勤務先\t架空A\n在籍期間\t2023年4月～現在\n\n"
+        "### **受付**・一般事務（2023年4月～現在）\n\n"
+        "身につけた能力：日程管理と情報共有\n\n"
+        "事前に担当者と確認しました。\n\n"
+        "【主な業務】\n\n- 来客対応\n- ・予約管理\n\n"
+        "■ 主な経験・強み\n\n"
+        "① 事前準備\n\n初めの説明です。\n\n後続の説明です。\n\n"
+        "■ 活かせる経験・スキル\n\n"
+        "経験・能力\t内容\nWord\t文書作成\nExcel\t表計算\n\n以上"
+    )
+    result = render_docx(parse_markdown(source))
+    path = tmp_path / "formatted.docx"
+    result.save(path)
+    doc = Document(path)
+
+    title = doc.paragraphs[0]
+    assert title.text == "職務経歴書"
+    assert title.alignment == WD_ALIGN_PARAGRAPH.CENTER
+    assert title.runs[0].font.size.pt == 20
+    assert title.runs[0].bold
+
+    summary = next(i for i, p in enumerate(doc.paragraphs) if p.text == "最初の段落です。")
+    assert doc.paragraphs[summary].paragraph_format.first_line_indent.pt == 0
+    assert doc.paragraphs[summary + 1].paragraph_format.first_line_indent.pt == 10.5
+
+    company, roles, skills = doc.tables
+    assert company.cell(0, 0).paragraphs[0].runs[0].font.size.pt == 10
+    assert company.cell(0, 0).paragraphs[0].runs[0].bold
+    assert company.cell(0, 1).paragraphs[0].runs[0].font.size.pt == 10
+    assert roles.cell(0, 0).paragraphs[0].runs[0].font.size.pt == 9.5
+    assert roles.cell(0, 0).paragraphs[0].runs[0].bold
+    assert roles.cell(1, 0).text == "受付・一般事務\n（2023年4月～現在）"
+    assert all(run.font.size.pt == 9.5 for run in roles.cell(1, 0).paragraphs[0].runs)
+    descriptions = roles.cell(1, 1).paragraphs
+    assert descriptions[0].text == "身につけた能力：日程管理と情報共有"
+    assert descriptions[0].runs[0].bold
+    assert all(r.font.size.pt == 9 for p in descriptions for r in p.runs if r.text)
+    assert descriptions[1].paragraph_format.first_line_indent.pt == 9.9
+    assert [p.text for p in descriptions[-2:]] == ["・来客対応", "・予約管理"]
+
+    strong = next(i for i, p in enumerate(doc.paragraphs) if p.text == "初めの説明です。")
+    assert all(r.bold for r in doc.paragraphs[strong].runs if r.text)
+    assert all(not r.bold for r in doc.paragraphs[strong + 1].runs if r.text)
+    assert doc.paragraphs[strong + 1].paragraph_format.first_line_indent.pt == 10.5
+
+    assert skills.cell(0, 0).paragraphs[0].runs[0].font.size.pt == 9.5
+    assert skills.cell(1, 0).paragraphs[0].runs[0].bold
+    assert skills.cell(1, 1).paragraphs[0].runs[0].font.size.pt == 9
+    assert "PAGE" in doc.sections[0].footer._element.xml
+
+
+def test_template_rpr_selector_and_unwanted_role_labels(sample_template):
+    """A first bold label must not contaminate the narrative run's style."""
+    from docx.shared import Pt
+    sample = Document(sample_template)
+    paragraph = sample.tables[1].cell(1, 1).paragraphs[0]
+    paragraph.clear()
+    a = paragraph.add_run("見出し：")
+    a.bold = True
+    a.font.size = Pt(12)
+    b = paragraph.add_run("{{MTW_ROLE_DETAIL}}")
+    b.bold = False
+    b.font.size = Pt(9)
+    sample.save(sample_template)
+
+    source = (
+        "■ 職務経歴\n\n勤務先\t架空A\n在籍期間\t2023年～現在\n\n"
+        "職種・期間と身につけた能力／経験・主な業務\n\n"
+        "### 受付\n\n通常の説明です。\n\n"
+        "### 主な成果\n\n改善しました。\n\n"
+        "【主な業務】\n\n- ・電話対応"
+    )
+    doc = render_docx(parse_markdown(source))
+    assert len(doc.tables) == 2
+    roles = doc.tables[1]
+    assert len(roles.rows) == 2
+    assert roles.cell(1, 0).text == "受付"
+    assert roles.cell(1, 1).paragraphs[0].runs[0].font.size.pt == 9
+    assert [p.text for p in roles.cell(1, 1).paragraphs][-1] == "・電話対応"
+    assert "職種・期間と身につけた能力" not in "\n".join(p.text for p in doc.paragraphs)

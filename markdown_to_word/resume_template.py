@@ -6,6 +6,7 @@ module deliberately does not reconstruct or approximate missing styles.
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 import re
 from zipfile import BadZipFile
@@ -17,6 +18,7 @@ from docx.oxml.ns import qn
 from docx.opc.constants import RELATIONSHIP_TYPE as RT
 from docx.table import Table
 from docx.text.paragraph import Paragraph
+from docx.shared import Pt, RGBColor
 
 from .errors import ConversionError
 from .models import Block, ParsedDocument, Span
@@ -66,9 +68,30 @@ def _load_template():
     return doc, paragraphs, tables
 
 
-def _format_run(run, prototype_rpr, span: Span) -> None:
+def _run_format(rpr, *, size: float | None = None, bold: bool | None = None) -> None:
+    """Apply only purpose-specific overrides to a cloned run format."""
+    if size is not None:
+        for tag in ("sz", "szCs"):
+            for old in list(rpr.findall(qn("w:" + tag))):
+                rpr.remove(old)
+            node = OxmlElement("w:" + tag)
+            node.set(qn("w:val"), str(round(size * 2)))
+            rpr.append(node)
+    if bold is not None:
+        for old in list(rpr.findall(qn("w:b"))):
+            rpr.remove(old)
+        node = OxmlElement("w:b")
+        node.set(qn("w:val"), "1" if bold else "0")
+        rpr.append(node)
+
+
+def _format_run(run, prototype_rpr, span: Span, *,
+                size: float | None = None, bold: bool | None = None) -> None:
     if prototype_rpr is not None:
         run._r.insert(0, deepcopy(prototype_rpr))
+    if size is not None or bold is not None:
+        _run_format(run._r.get_or_add_rPr(), size=size,
+                    bold=(bold or span.bold) if bold is not None else None)
     if span.bold:
         run.bold = True
     if span.italic:
@@ -77,7 +100,8 @@ def _format_run(run, prototype_rpr, span: Span) -> None:
         run.font.name = "Consolas"
 
 
-def _append_spans(para: Paragraph, spans: tuple[Span, ...], prototype_rpr) -> None:
+def _append_spans(para: Paragraph, spans: tuple[Span, ...], prototype_rpr,
+                  *, size: float | None = None, bold: bool | None = None) -> None:
     for span in spans:
         if span.link and span.link.lower().startswith(("https://", "http://", "mailto:")):
             for n, part in enumerate(span.text.split("\n")):
@@ -90,10 +114,25 @@ def _append_spans(para: Paragraph, spans: tuple[Span, ...], prototype_rpr) -> No
                 hyperlink.set(qn("r:id"), rel)
                 r = OxmlElement("w:r")
                 rpr = deepcopy(prototype_rpr) if prototype_rpr is not None else OxmlElement("w:rPr")
+                _run_format(rpr, size=size,
+                            bold=(bold or span.bold) if bold is not None else None)
                 if span.bold:
+                    for old in list(rpr.findall(qn("w:b"))):
+                        rpr.remove(old)
                     rpr.append(OxmlElement("w:b"))
                 if span.italic:
+                    for old in list(rpr.findall(qn("w:i"))):
+                        rpr.remove(old)
                     rpr.append(OxmlElement("w:i"))
+                if span.code:
+                    fonts = rpr.find(qn("w:rFonts"))
+                    if fonts is None:
+                        fonts = OxmlElement("w:rFonts")
+                        rpr.insert(0, fonts)
+                    fonts.set(qn("w:ascii"), "Consolas")
+                    fonts.set(qn("w:hAnsi"), "Consolas")
+                for old in list(rpr.findall(qn("w:u"))):
+                    rpr.remove(old)
                 underline = OxmlElement("w:u")
                 underline.set(qn("w:val"), "single")
                 rpr.append(underline)
@@ -106,7 +145,7 @@ def _append_spans(para: Paragraph, spans: tuple[Span, ...], prototype_rpr) -> No
         else:
             for n, part in enumerate(span.text.split("\n")):
                 run = para.add_run()
-                _format_run(run, prototype_rpr, span)
+                _format_run(run, prototype_rpr, span, size=size, bold=bold)
                 if n:
                     run.add_break()
                 if part:
@@ -119,39 +158,60 @@ def _clean_paragraph(element) -> None:
             element.remove(child)
     ppr = element.find(qn("w:pPr"))
     if ppr is not None:
-        # Never replicate intentional page breaks from an exemplar.
+        # The exemplar's numbering and manual breaks are not source text.
+        # _native_list() reintroduces numbering for Markdown lists.
         for child in list(ppr):
-            if child.tag == qn("w:pageBreakBefore"):
+            if child.tag in (qn("w:pageBreakBefore"), qn("w:numPr")):
                 ppr.remove(child)
 
 
-def _first_rpr(paragraph_element):
-    nodes = paragraph_element.xpath(".//w:rPr")
-    return deepcopy(nodes[0]) if nodes else None
+def _sample_rpr(paragraph_element, *, normal: bool = False):
+    """Choose the placeholder run or the normal-text run, not the first label."""
+    runs = paragraph_element.xpath("./w:r")
+    if normal:
+        for node in runs:
+            rpr = node.find(qn("w:rPr"))
+            if rpr is None:
+                continue
+            bold = rpr.find(qn("w:b"))
+            if bold is None or bold.get(qn("w:val")) in ("0", "false", "off"):
+                return deepcopy(rpr)
+    for node in runs:
+        if any("{{MTW_" in (t.text or "") for t in node.xpath("./w:t")):
+            rpr = node.find(qn("w:rPr"))
+            if rpr is not None:
+                return deepcopy(rpr)
+    for node in runs:
+        rpr = node.find(qn("w:rPr"))
+        if rpr is not None:
+            return deepcopy(rpr)
+    return None
 
 
-def _new_paragraph(doc, prototypes, key: str, spans: tuple[Span, ...]):
+def _new_paragraph(doc, prototypes, key: str, spans: tuple[Span, ...], *,
+                   size: float | None = None, bold: bool | None = None):
     source = prototypes.get(key)
     if source is None:
         source = prototypes["BODY"]
     element = deepcopy(source)
-    rpr = _first_rpr(element)
+    rpr = _sample_rpr(element, normal=(key == "BODY"))
     _clean_paragraph(element)
     doc.element.body.insert_element_before(element, "w:sectPr")
     para = Paragraph(element, doc._body)
-    _append_spans(para, spans, rpr)
+    _append_spans(para, spans, rpr, size=size, bold=bold)
     return para
 
 
-def _fill_cell(cell, spans: tuple[Span, ...]) -> None:
+def _fill_cell(cell, spans: tuple[Span, ...], *,
+               size: float | None = None, bold: bool | None = None) -> None:
     paras = cell.paragraphs
     if not paras:
         cell.add_paragraph()
         paras = cell.paragraphs
     first = paras[0]
-    rpr = _first_rpr(first._p)
+    rpr = _sample_rpr(first._p, normal=(bold is False))
     _clean_paragraph(first._p)
-    _append_spans(first, spans, rpr)
+    _append_spans(first, spans, rpr, size=size, bold=bold)
     for para in paras[1:]:
         para._p.getparent().remove(para._p)
     # Remove any original nested table/content in the prototype cell.
@@ -215,7 +275,7 @@ def _draw_company(doc, prototypes, block: Block) -> None:
     table = _new_table(doc, prototypes, "COMPANY", header=False, count=len(rows))
     for ri, cells in enumerate(rows):
         for ci in range(min(2, len(cells))):
-            _fill_cell(table.cell(ri, ci), cells[ci])
+            _fill_cell(table.cell(ri, ci), cells[ci], size=10, bold=(ci == 0))
         _row_flag(table.rows[ri], "cantSplit", _keep_compact_table_row(cells))
 
 
@@ -227,11 +287,11 @@ def _draw_skill(doc, prototypes, block: Block) -> None:
         rows.pop(0)
     table = _new_table(doc, prototypes, "SKILL", header=header, count=len(rows))
     if header:
-        _fill_cell(table.cell(0, 0), block.rows[0][0])
-        _fill_cell(table.cell(0, 1), block.rows[0][1])
+        _fill_cell(table.cell(0, 0), block.rows[0][0], size=9.5, bold=True)
+        _fill_cell(table.cell(0, 1), block.rows[0][1], size=9.5, bold=True)
     for ri, cells in enumerate(rows, start=int(header)):
         for ci in range(min(2, len(cells))):
-            _fill_cell(table.cell(ri, ci), cells[ci])
+            _fill_cell(table.cell(ri, ci), cells[ci], size=9, bold=(ci == 0))
         _row_flag(table.rows[ri], "cantSplit", _keep_compact_table_row(cells))
 
 
@@ -316,6 +376,58 @@ def _display_role_spans(spans: tuple[Span, ...]) -> tuple[Span, ...]:
     return tuple(converted)
 
 
+def _is_repeated_role_header(block: Block) -> bool:
+    """Suppress only the duplicated fixed label, never candidate prose."""
+    if block.kind not in ("heading", "paragraph"):
+        return False
+    label = re.sub(r"\s+", "", _text(block.spans))
+    return label in (
+        "職種・期間と身につけた能力／経験・主な業務",
+        "職種・期間／身につけた能力／経験・主な業務",
+    )
+
+
+def _break_role_period(spans: tuple[Span, ...]) -> tuple[Span, ...]:
+    """Split the trailing period without losing per-span Markdown formatting."""
+    text = _text(spans)
+    match = re.search(
+        r"（\d{4}年\s*\d{1,2}月\s*[～〜－-]\s*(?:現在|\d{4}年\s*\d{1,2}月)）$",
+        text,
+    )
+    if not match or match.start() == 0 or text[match.start() - 1] == "\n":
+        return spans
+    offset = match.start()
+    output = []
+    for span in spans:
+        length = len(span.text)
+        if 0 < offset < length:
+            output.append(replace(span, text=span.text[:offset]))
+            output.append(replace(span, text="\n" + span.text[offset:]))
+        elif offset == 0:
+            output.append(replace(span, text="\n" + span.text))
+        else:
+            output.append(span)
+        offset -= length
+    return tuple(output)
+
+
+def _emphasize_ability_label(spans: tuple[Span, ...]) -> tuple[Span, ...]:
+    """Emphasize only the opening label and preserve the original text."""
+    match = re.match(r"^(?:身につけた能力|身につけたスキル)[：:]", _text(spans))
+    if not match:
+        return spans
+    remaining = match.end()
+    output = []
+    for span in spans:
+        take = min(remaining, len(span.text))
+        if take:
+            output.append(replace(span, text=span.text[:take], bold=True))
+        if take < len(span.text):
+            output.append(replace(span, text=span.text[take:]))
+        remaining -= take
+    return tuple(output)
+
+
 def _keep_compact_role(left: tuple[Span, ...], entries: list[Block]) -> bool:
     """Keep a handful of short paragraphs; let Word split lengthy role rows."""
     values = [_text(b.spans) for b in entries]
@@ -328,8 +440,7 @@ def _keep_compact_role(left: tuple[Span, ...], entries: list[Block]) -> bool:
 
 
 def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc) -> None:
-    # The template provides distinct direct formatting for narrative content,
-    # the 【主な業務】 subheading, and its literal-bullet lines.
+    # Separate paragraph exemplars for narrative text, task headings and bullets.
     source = [deepcopy(p._p) for p in cell.paragraphs]
     if len(source) < 3:
         raise ConversionError("Wordテンプレートの職務内容書式が不足しています。")
@@ -337,6 +448,7 @@ def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc) -
         if node.tag != qn("w:tcPr"):
             cell._tc.remove(node)
     tasks = False
+    narrative_index = 0
     for block in entries:
         subheading = _is_subheading(block)
         if _in_tasks_heading(block):
@@ -352,38 +464,45 @@ def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc) -
             if block.kind != "list":
                 tasks = False
         element = deepcopy(template)
-        rpr = _first_rpr(element)
+        rpr = _sample_rpr(element, normal=not subheading)
         _clean_paragraph(element)
         cell._tc.append(element)
         para = Paragraph(element, cell)
         spans = block.spans
-        if block.kind == "list" and tasks and not block.ordered:
-            spans = (Span("・" if not _text(spans).startswith("・") else ""),) + spans
+        literal_bullet = block.kind == "list" and tasks and not block.ordered
+        if literal_bullet:
+            if not _text(spans).startswith("・"):
+                spans = (Span("・"),) + spans
+            if para.style.name.startswith("List "):
+                para.style = doc.styles["Normal"]
         elif block.kind == "list":
             _native_list(para, block, list_ids, doc)
-        # Explicitly break inherited keep-chains from the exemplar.
+        elif block.kind == "paragraph":
+            spans = _emphasize_ability_label(spans)
+            if narrative_index:
+                para.paragraph_format.first_line_indent = Pt(9.9)
+            narrative_index += 1
         para.paragraph_format.keep_with_next = subheading
         para.paragraph_format.keep_together = subheading
         para.paragraph_format.widow_control = True
-        _append_spans(para, spans, rpr)
+        _append_spans(para, spans, rpr, size=9,
+                      bold=True if subheading else False if block.kind == "paragraph" else None)
     if not entries:
         element = deepcopy(source[0])
         _clean_paragraph(element)
         cell._tc.append(element)
 
+
 def _draw_roles(doc, prototypes, roles: list[tuple[Block, list[Block]]], list_ids) -> None:
     if not roles:
         return
+    # The ideal Word includes a genuine header; remove only duplicate labels.
     table = _new_table(doc, prototypes, "ROLE", header=True, count=len(roles))
-    _fill_cell(table.cell(0, 0), (Span("職種・期間"),))
-    _fill_cell(table.cell(0, 1), (Span("身につけた能力／経験・主な業務"),))
+    _fill_cell(table.cell(0, 0), (Span("職種・期間"),), size=9.5, bold=True)
+    _fill_cell(table.cell(0, 1), (Span("身につけた能力／経験・主な業務"),), size=9.5, bold=True)
     for index, (role, items) in enumerate(roles, 1):
         row = table.rows[index]
-        left_spans = _display_role_spans(role.spans)
-        title = _text(left_spans)
-        # Keep the original words while placing the period on its own line.
-        if len(role.spans) == 1 and re.search(r"（\d{4}年.*[～〜－-].*）$", title):
-            left_spans = (Span(re.sub(r"(?=（\d{4}年.*[～〜－-].*）$)", "\n", title)),)
+        left_spans = _break_role_period(_display_role_spans(role.spans))
         detail_items = items
         if items and items[0].kind == "paragraph" and re.fullmatch(
             r"\d{4}年\s*\d{1,2}月\s*[～〜－-]\s*(?:現在|\d{4}年\s*\d{1,2}月)",
@@ -391,9 +510,8 @@ def _draw_roles(doc, prototypes, roles: list[tuple[Block, list[Block]]], list_id
         ):
             left_spans = left_spans + (Span("\n"),) + items[0].spans
             detail_items = items[1:]
-        _fill_cell(row.cells[0], left_spans)
+        _fill_cell(row.cells[0], left_spans, size=9.5, bold=True)
         _write_cell_job(row.cells[1], detail_items, list_ids, doc)
-        # Leave lengthy multi-paragraph roles splittable in Word.
         _row_flag(row, "cantSplit", _keep_compact_role(left_spans, detail_items))
 
 
@@ -433,7 +551,8 @@ def _draw_general_table(doc, block: Block) -> None:
                     fonts.set(qn("w:" + attr), "Meiryo UI")
 
 
-def _draw_block(doc, paragraphs, tables, block: Block, list_ids, *, tasks=False):
+def _draw_block(doc, paragraphs, tables, block: Block, list_ids, *, tasks=False,
+                first_line_indent: float | None = None, strong_intro: bool = False):
     if block.kind == "table":
         if block.table_type == "company":
             _draw_company(doc, tables, block)
@@ -451,7 +570,21 @@ def _draw_block(doc, paragraphs, tables, block: Block, list_ids, *, tasks=False)
     if block.kind == "list" and tasks and not block.ordered:
         raw = _text(spans)
         spans = (Span("・" if not raw.startswith("・") else ""),) + spans
-    p = _new_paragraph(doc, paragraphs, key, spans)
+    if strong_intro:
+        spans = tuple(replace(span, bold=True) for span in spans)
+    p = _new_paragraph(doc, paragraphs, key, spans,
+                       size=20 if block.kind == "meta_title" else None,
+                       bold=True if block.kind == "meta_title" else None)
+    if first_line_indent is not None:
+        p.paragraph_format.first_line_indent = Pt(first_line_indent)
+    if block.kind == "meta_title":
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p.paragraph_format.first_line_indent = Pt(0)
+        for run in p.runs:
+            run.font.name = "Meiryo UI"
+            fonts = run._r.get_or_add_rPr().find(qn("w:rFonts"))
+            if fonts is not None:
+                fonts.set(qn("w:eastAsia"), "Meiryo UI")
     if block.kind == "list" and not (tasks and not block.ordered):
         _native_list(p, block, list_ids, doc)
     if block.kind == "heading" or _in_tasks_heading(block):
@@ -479,6 +612,8 @@ def _work_after_company(doc, paragraphs, tables, blocks: tuple[Block, ...], list
 
     for index, block in enumerate(blocks):
         following = blocks[index + 1] if index + 1 < len(blocks) else None
+        if _is_repeated_role_header(block):
+            continue
         if _is_role(block, first=not roles, following=following):
             roles.append((block, []))
             tasks = False
@@ -494,6 +629,19 @@ def _work_after_company(doc, paragraphs, tables, blocks: tuple[Block, ...], list
     flush()
 
 
+def _format_page_fields(doc) -> None:
+    """Match existing PAGE fields without adding or duplicating them."""
+    for section in doc.sections:
+        for para in section.footer.paragraphs:
+            instructions = para._p.xpath(".//w:instrText")
+            if not any(re.search(r"\bPAGE\b", node.text or "") for node in instructions):
+                continue
+            para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            for run in para.runs:
+                run.font.size = Pt(9)
+                run.font.color.rgb = RGBColor(0x6E, 0x6E, 0x6E)
+
+
 def render_resume(parsed: ParsedDocument):
     """Build a résumé from Markdown while cloning original DOCX formatting.
 
@@ -503,13 +651,25 @@ def render_resume(parsed: ParsedDocument):
     list_ids: dict[int, int] = {}
     in_history = False
     tasks = False
+    section = ""
+    section_paragraph_count = 0
+    episode_active = False
+    episode_paragraph_count = 0
     blocks = parsed.blocks
     i = 0
     while i < len(blocks):
         block = blocks[i]
         if block.kind == "heading" and block.level == 1:
-            in_history = _text(block.spans).strip().removeprefix("■").strip() == "職務経歴"
+            section = _text(block.spans).strip().removeprefix("■").strip()
+            in_history = section == "職務経歴"
             tasks = False
+            section_paragraph_count = 0
+            episode_active = False
+            episode_paragraph_count = 0
+        elif (section == "主な経験・強み" and block.kind == "heading"
+              and block.level >= 2):
+            episode_active = bool(_CIRCLED_PREFIX.match(_text(block.spans).strip()))
+            episode_paragraph_count = 0
         if in_history and block.kind == "table" and block.table_type == "company":
             _draw_company(doc, tables, block)
             j = i + 1
@@ -527,6 +687,18 @@ def render_resume(parsed: ParsedDocument):
             tasks = True
         elif block.kind != "list":
             tasks = False
-        _draw_block(doc, paragraphs, tables, block, list_ids, tasks=tasks)
+        indent = None
+        strong_intro = False
+        if block.kind == "paragraph":
+            if section == "職務要約":
+                indent = 0 if section_paragraph_count == 0 else 10.5
+                section_paragraph_count += 1
+            elif section == "主な経験・強み" and episode_active:
+                indent = 0 if episode_paragraph_count == 0 else 10.5
+                strong_intro = episode_paragraph_count == 0
+                episode_paragraph_count += 1
+        _draw_block(doc, paragraphs, tables, block, list_ids, tasks=tasks,
+                    first_line_indent=indent, strong_intro=strong_intro)
         i += 1
+    _format_page_fields(doc)
     return doc
