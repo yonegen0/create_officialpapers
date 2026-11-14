@@ -172,6 +172,17 @@ def _row_flag(row, name: str, enabled: bool) -> None:
         trpr.append(marker)
 
 
+def _keep_compact_table_row(cells: tuple[tuple[Span, ...], ...]) -> bool:
+    """Only keep concise, unbroken table rows on one page."""
+    values = [_text(cell).strip() for cell in cells]
+    return (
+        bool(values)
+        and all("\n" not in value for value in values)
+        and all(len(value) <= 100 for value in values)
+        and sum(len(value) for value in values) <= 150
+    )
+
+
 def _new_table(doc, prototypes, key: str, *, header: bool, count: int):
     source = deepcopy(prototypes[key])
     old_rows = list(source.tr_lst)
@@ -205,7 +216,7 @@ def _draw_company(doc, prototypes, block: Block) -> None:
     for ri, cells in enumerate(rows):
         for ci in range(min(2, len(cells))):
             _fill_cell(table.cell(ri, ci), cells[ci])
-        _row_flag(table.rows[ri], "cantSplit", True)
+        _row_flag(table.rows[ri], "cantSplit", _keep_compact_table_row(cells))
 
 
 def _draw_skill(doc, prototypes, block: Block) -> None:
@@ -221,18 +232,99 @@ def _draw_skill(doc, prototypes, block: Block) -> None:
     for ri, cells in enumerate(rows, start=int(header)):
         for ci in range(min(2, len(cells))):
             _fill_cell(table.cell(ri, ci), cells[ci])
-        _row_flag(table.rows[ri], "cantSplit", sum(len(s.text) for c in cells for s in c) < 180)
+        _row_flag(table.rows[ri], "cantSplit", _keep_compact_table_row(cells))
+
+
+_CIRCLED_PREFIX = re.compile(r"^[①-⑳]\s*")
+_ROLE_PERIOD = re.compile(
+    r"^.+（\d{4}年\s*\d{1,2}月\s*[～〜－-]\s*(?:現在|\d{4}年\s*\d{1,2}月)）$"
+)
+_ROLE_HINT = re.compile(
+    r"営業|企画|受付|事務|人事|総務|経理|開発|技術|設計|製造|品質|"
+    r"販売|接客|広報|物流|購買|管理|サポート|エンジニア|デザイナー"
+)
+_SUBHEADINGS = frozenset((
+    "主な成果", "主な実績", "担当業務", "業務内容", "主な業務",
+    "工夫した点", "身につけた能力", "身につけたスキル",
+    "取り組み", "成果", "実績", "課題", "改善内容",
+))
 
 
 def _in_tasks_heading(block: Block) -> bool:
     return block.kind == "heading" and _text(block.spans).strip() == "【主な業務】"
 
 
-def _is_role(block: Block) -> bool:
+def _is_subheading(block: Block) -> bool:
     if block.kind != "heading" or block.level < 2:
         return False
     content = _text(block.spans).strip()
-    return bool(content and not content.startswith(("■", "【")) and not ("①" <= content[0] <= "⑳"))
+    label = _CIRCLED_PREFIX.sub("", content)
+    if label.startswith("【"):
+        return True
+    if label in _SUBHEADINGS or any(
+        label.startswith(title + sep)
+        for title in _SUBHEADINGS for sep in ("：", ":")
+    ):
+        return True
+    # A circled-number episode is never a role merely because it is a heading.
+    return label != content and not (
+        label.startswith("職種：") or _ROLE_PERIOD.fullmatch(label)
+    )
+
+
+def _is_role(block: Block, *, first: bool, following: Block | None) -> bool:
+    if block.kind != "heading" or block.level < 2 or _is_subheading(block):
+        return False
+    content = _text(block.spans).strip()
+    if not content or content.startswith(("■", "【")):
+        return False
+    if content.startswith("職種："):
+        return bool(content.removeprefix("職種：").strip())
+    label = _CIRCLED_PREFIX.sub("", content)
+    if _ROLE_PERIOD.fullmatch(label):
+        return True
+    if label != content or following is None or following.kind in ("table", "rule"):
+        return False
+    # A short, unnumbered heading after company information is a legacy role.
+    # Later roles also need role-like wording; ambiguous headings stay in the
+    # preceding role's right cell instead of creating spurious rows.
+    if len(label) > 24 or re.search(r"[。！？!?:：\n]", label):
+        return False
+    if label.endswith(("こと", "方法", "理由", "ポイント", "取り組み", "経験",
+                       "成果", "実績", "能力", "スキル", "課題")):
+        return False
+    return first or bool(_ROLE_HINT.search(label))
+
+
+def _display_role_spans(spans: tuple[Span, ...]) -> tuple[Span, ...]:
+    """Remove only the optional role marker, retaining inline formatting."""
+    if not _text(spans).startswith("職種："):
+        return spans
+    skip = len("職種：")
+    converted: list[Span] = []
+    for span in spans:
+        if skip >= len(span.text):
+            skip -= len(span.text)
+            continue
+        value = span.text[skip:] if skip else span.text
+        skip = 0
+        if not converted:
+            value = value.lstrip()
+        if value:
+            converted.append(Span(value, span.bold, span.italic, span.link,
+                                  span.code, span.break_line))
+    return tuple(converted)
+
+
+def _keep_compact_role(left: tuple[Span, ...], entries: list[Block]) -> bool:
+    """Keep a handful of short paragraphs; let Word split lengthy role rows."""
+    values = [_text(b.spans) for b in entries]
+    return (
+        len(entries) <= 3
+        and all("\n" not in value for value in values)
+        and all(len(value) <= 110 for value in values)
+        and len(_text(left)) + sum(len(value) for value in values) <= 240
+    )
 
 
 def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc) -> None:
@@ -246,8 +338,12 @@ def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc) -
             cell._tc.remove(node)
     tasks = False
     for block in entries:
+        subheading = _is_subheading(block)
         if _in_tasks_heading(block):
             tasks = True
+            template = source[1]
+        elif subheading:
+            tasks = False
             template = source[1]
         elif block.kind == "list" and tasks and not block.ordered:
             template = source[2]
@@ -265,8 +361,10 @@ def _write_cell_job(cell, entries: list[Block], list_ids: dict[int, int], doc) -
             spans = (Span("・" if not _text(spans).startswith("・") else ""),) + spans
         elif block.kind == "list":
             _native_list(para, block, list_ids, doc)
-        if _in_tasks_heading(block):
-            para.paragraph_format.keep_with_next = True
+        # Explicitly break inherited keep-chains from the exemplar.
+        para.paragraph_format.keep_with_next = subheading
+        para.paragraph_format.keep_together = subheading
+        para.paragraph_format.widow_control = True
         _append_spans(para, spans, rpr)
     if not entries:
         element = deepcopy(source[0])
@@ -281,8 +379,8 @@ def _draw_roles(doc, prototypes, roles: list[tuple[Block, list[Block]]], list_id
     _fill_cell(table.cell(0, 1), (Span("身につけた能力／経験・主な業務"),))
     for index, (role, items) in enumerate(roles, 1):
         row = table.rows[index]
-        title = _text(role.spans)
-        left_spans = role.spans
+        left_spans = _display_role_spans(role.spans)
+        title = _text(left_spans)
         # Keep the original words while placing the period on its own line.
         if len(role.spans) == 1 and re.search(r"（\d{4}年.*[～〜－-].*）$", title):
             left_spans = (Span(re.sub(r"(?=（\d{4}年.*[～〜－-].*）$)", "\n", title)),)
@@ -295,9 +393,8 @@ def _draw_roles(doc, prototypes, roles: list[tuple[Block, list[Block]]], list_id
             detail_items = items[1:]
         _fill_cell(row.cells[0], left_spans)
         _write_cell_job(row.cells[1], detail_items, list_ids, doc)
-        length = len(_text(left_spans)) + sum(len(_text(item.spans)) for item in detail_items)
-        # Split long descriptions naturally instead of moving the whole row.
-        _row_flag(row, "cantSplit", length < 180)
+        # Leave lengthy multi-paragraph roles splittable in Word.
+        _row_flag(row, "cantSplit", _keep_compact_role(left_spans, detail_items))
 
 
 def _native_list(para, block: Block, list_ids: dict[int, int], doc) -> None:
@@ -380,8 +477,9 @@ def _work_after_company(doc, paragraphs, tables, blocks: tuple[Block, ...], list
             _draw_roles(doc, tables, roles, list_ids)
             roles.clear()
 
-    for block in blocks:
-        if _is_role(block):
+    for index, block in enumerate(blocks):
+        following = blocks[index + 1] if index + 1 < len(blocks) else None
+        if _is_role(block, first=not roles, following=following):
             roles.append((block, []))
             tasks = False
         elif roles and block.kind != "table":

@@ -157,3 +157,81 @@ def test_bundled_real_template_roundtrip(tmp_path):
     all_text += "\n".join(c.text for t in reopened.tables for row in t.rows for c in row.cells)
     assert "山崎製パン" not in all_text and "{{MTW_" not in all_text
     assert file.stat().st_size > 1000
+
+
+def _has_row_flag(row, flag):
+    trpr = row._tr.trPr
+    return trpr is not None and trpr.find(qn("w:" + flag)) is not None
+
+
+def test_role_subheadings_remain_in_right_cell(sample_template):
+    source = (
+        "■ 職務経歴\n\n勤務先\t架空A\n在籍期間\t2023年～現在\n\n"
+        "### 受付・一般事務\n\n来客対応や予約管理を担当しました。\n\n"
+        "### 主な成果\n\n予約内容の確認方法を改善しました。\n\n"
+        "### 工夫した点\n\n関係者への事前確認を徹底しました。\n\n"
+        "【主な業務】\n\n- 来客対応\n- 予約管理"
+    )
+    doc = render_docx(parse_markdown(source))
+    assert len(doc.tables) == 2
+    role_table = doc.tables[1]
+    assert len(role_table.rows) == 2
+    assert role_table.cell(1, 0).text == "受付・一般事務"
+    paragraphs = role_table.cell(1, 1).paragraphs
+    assert [p.text for p in paragraphs] == [
+        "来客対応や予約管理を担当しました。",
+        "主な成果", "予約内容の確認方法を改善しました。",
+        "工夫した点", "関係者への事前確認を徹底しました。",
+        "【主な業務】", "・来客対応", "・予約管理",
+    ]
+    assert all(paragraphs[i].paragraph_format.keep_with_next for i in (1, 3, 5))
+    assert all(paragraphs[i].paragraph_format.keep_with_next is False for i in (0, 2, 4, 6, 7))
+
+
+def test_circled_role_and_episode_headings(sample_template):
+    source = (
+        "■ 職務経歴\n\n勤務先\t架空A\n在籍期間\t2023年～現在\n\n"
+        "### ① 受付（2023年4月～現在）\n\n来客対応を担当しました。\n\n"
+        "① 来客対応で工夫したこと\n\n事前に確認しました。\n\n"
+        "### ① 来客対応の事前準備\n\n手順を整理しました。\n\n"
+        "① 受付業務\n\n内容を説明しました。\n\n"
+        "### 職種：企画\n\n企画業務を担当しました。"
+    )
+    doc = render_docx(parse_markdown(source))
+    assert len(doc.tables) == 2
+    role_table = doc.tables[1]
+    assert len(role_table.rows) == 3
+    assert role_table.cell(1, 0).text == "① 受付\n（2023年4月～現在）"
+    assert role_table.cell(2, 0).text == "企画"
+    first_paragraphs = role_table.cell(1, 1).paragraphs
+    assert [p.text for p in first_paragraphs] == [
+        "来客対応を担当しました。",
+        "① 来客対応で工夫したこと", "事前に確認しました。",
+        "① 来客対応の事前準備", "手順を整理しました。",
+        "① 受付業務", "内容を説明しました。",
+    ]
+    assert all(p._p.pPr is None or p._p.pPr.numPr is None for p in first_paragraphs)
+    assert role_table.cell(2, 1).text == "企画業務を担当しました。"
+
+
+def test_resume_row_break_controls(sample_template):
+    source = (
+        "■ 職務経歴\n\n勤務先\t架空A\n在籍期間\t" + "2023年～現在" + "\n\n"
+        "### 受付\n\n短い説明です。\n\n"
+        "### 営業\n\n" + ("長い説明です。" * 40) + "\n\n"
+        "### 工夫した点\n\n" + ("改行を含む文章です。\n" * 6) + "\n\n"
+        "■ 活かせる経験・スキル\n\n経験・能力\t内容\n"
+        "Word\t文書作成\nExcel\t" + ("詳細な説明。" * 45)
+    )
+    doc = render_docx(parse_markdown(source))
+    company, roles, skills = doc.tables
+    assert all(_has_row_flag(row, "cantSplit") for row in company.rows)
+    assert _has_row_flag(roles.rows[0], "tblHeader")
+    assert _has_row_flag(roles.rows[0], "cantSplit")
+    assert _has_row_flag(roles.rows[1], "cantSplit")
+    assert not _has_row_flag(roles.rows[2], "cantSplit")
+    assert _has_row_flag(skills.rows[0], "tblHeader")
+    assert _has_row_flag(skills.rows[1], "cantSplit")
+    assert not _has_row_flag(skills.rows[2], "cantSplit")
+    heading = next(p for p in roles.cell(2, 1).paragraphs if p.text == "工夫した点")
+    assert heading.paragraph_format.keep_with_next
