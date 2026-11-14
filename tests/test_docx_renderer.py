@@ -410,7 +410,7 @@ def test_long_company_table_is_not_chained(sample_template):
     source = (
         "■ 職務経歴\n\n"
         "勤務先\t架空A\n在籍期間\t2023年～現在\n"
-        "所在地\t" + "長い所在地" * 28 + "\n\n"
+        "事業内容\t" + "長い所在地" * 28 + "\n\n"
         "### 受付\n\n通常の説明です。"
     )
     doc = render_docx(parse_markdown(source))
