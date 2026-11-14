@@ -428,9 +428,9 @@ def test_history_table_layout_has_consistent_grid_borders_and_bullets(sample_tem
     source = (
         "■ 職務経歴\n\n"
         "勤務先\t架空株式会社A\n在籍期間\t2023年4月～現在\n雇用形態\t正社員\n\n"
-        "### 受付（2023年4月～現在）\n\n短い説明です。\n\n"
+        "### 受付（2023年10月～現在）\n\n短い説明です。\n\n"
         "【主な業務】\n\n- 来客対応\n- 電話対応\n\n"
-        "### 企画\n\n" + "長い業務説明です。" * 45 + "\n\n"
+        "### 企画（2021年4月～2023年9月）\n\n" + "長い業務説明です。" * 45 + "\n\n"
         "【主な業務】\n\n- 資料作成\n- 予定確認\n\n"
         "勤務先\t架空株式会社B\n在籍期間\t2021年4月～2023年3月\n\n"
         "### 一般事務\n\n書類整理を担当しました。"
@@ -443,19 +443,32 @@ def test_history_table_layout_has_consistent_grid_borders_and_bullets(sample_tem
         company = index in (0, 2)
         assert table.autofit is False
         assert abs(sum(col.width for col in table.columns) - expected) < Cm(0.01)
-        left_cm = 3.5 if company else 4.2
-        assert abs(table.columns[0].width - expected * left_cm / 17.4) < Cm(0.01)
+        assert len(table.columns) == 2
+        assert abs(table.columns[0].width - expected * 3.5 / 17.4) < Cm(0.01)
+        assert len(table._tbl.tblGrid.gridCol_lst) == 2
+        assert [int(col.get(qn("w:w"))) for col in table._tbl.tblGrid.gridCol_lst] == [
+            int(col.width) // 635 for col in table.columns
+        ]
+        assert all(
+            len(row._tr.tc_lst) == 2 and
+            all(tc.get_or_add_tcPr().find(qn("w:gridSpan")) is None
+                for tc in row._tr.tc_lst)
+            for row in table.rows
+        )
         assert all(
             abs(cell.width - table.columns[ci].width) < Cm(0.01)
             for row in table.rows for ci, cell in enumerate(row.cells)
         )
         tbl_pr = table._tbl.tblPr
         assert tbl_pr.find(qn("w:tblW")).get(qn("w:type")) == "dxa"
+        assert int(tbl_pr.find(qn("w:tblW")).get(qn("w:w"))) == sum(
+            int(col.width) // 635 for col in table.columns
+        )
         borders = tbl_pr.find(qn("w:tblBorders"))
         assert len(borders.findall(qn("w:top"))) == 1
         for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
             edge = borders.find(qn("w:" + side))
-            assert (edge.get(qn("w:sz")), edge.get(qn("w:color"))) == ("4", "A8BAC8")
+            assert (edge.get(qn("w:sz")), edge.get(qn("w:color"))) == ("6", "8799AA")
         margins = tbl_pr.find(qn("w:tblCellMar"))
         assert [margins.find(qn("w:" + side)).get(qn("w:w"))
                 for side in ("top", "left", "bottom", "right")] == [
@@ -475,6 +488,10 @@ def test_history_table_layout_has_consistent_grid_borders_and_bullets(sample_tem
                for para in cell.paragraphs for run in para.runs if run.text)
     assert _has_row_flag(doc.tables[1].rows[0], "tblHeader")
     assert not _has_row_flag(doc.tables[1].rows[2], "cantSplit")
+    assert doc.tables[1].cell(1, 0).text == "受付\n（2023年10月～\n現在）"
+    assert doc.tables[1].cell(2, 0).text == "企画\n（2021年4月～\n2023年9月）"
+    assert all(doc.tables[1].cell(index, 0).paragraphs[0].paragraph_format.keep_with_next is False
+               for index in (1, 2))
     bullets = [p for p in doc.tables[1].cell(1, 1).paragraphs if p.text.startswith("・")]
     assert [p.text for p in bullets] == ["・来客対応", "・電話対応"]
     assert all(p.paragraph_format.left_indent == Pt(10)
