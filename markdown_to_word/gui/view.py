@@ -446,7 +446,7 @@ class TkView:
         self.input_text.configure(state="disabled" if busy else "normal")
         if not busy:
             self.name_entry.configure(state="disabled" if self._batch_mode else "normal")
-        single = self.controller.last_result_kind == "single" and self.controller.last_output is not None
+        single = self.controller.last_result_kind != "batch" and self.controller.last_output is not None
         batch = (self.controller.last_result_kind == "batch" and
                  self.controller.last_batch_result is not None and
                  bool(self.controller.last_batch_result.saved))
