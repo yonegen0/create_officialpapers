@@ -555,6 +555,84 @@ def test_resume_clears_inherited_body_page_controls(sample_template):
     assert doc.tables[1].cell(1, 0).text == "受付"
 
 
+
+def test_circled_experience_headings_remove_editing_margin_flags(sample_template):
+    from docx.shared import Pt
+
+    template = Document(sample_template)
+    # The bundled fixture uses HEADING2 only; cover ### (HEADING3) too.
+    template.add_paragraph("{{MTW_HEADING3}}")
+    for key in ("HEADING2", "HEADING3"):
+        exemplar = next(p for p in template.paragraphs if p.text == "{{MTW_" + key + "}}")
+        exemplar.paragraph_format.keep_with_next = True
+        exemplar.paragraph_format.keep_together = True
+        exemplar.paragraph_format.widow_control = True
+        exemplar.runs[0].font.size = Pt(11)
+        exemplar.runs[0].bold = True
+    template.save(sample_template)
+
+    source = (
+        "■ 主な経験・強み\n\n"
+        "### ① 事前準備で工夫したこと\n\n説明文です。\n\n"
+        "### ② 情報共有で工夫したこと\n\n説明文です。\n\n"
+        "■ 自己PR\n\n### ① 別セクションの見出し\n\n本文です。"
+    )
+    doc = render_docx(parse_markdown(source))
+    headings = [p for p in doc.paragraphs if p.text.startswith(("①", "②"))]
+    assert [p.text for p in headings] == [
+        "① 事前準備で工夫したこと",
+        "② 情報共有で工夫したこと",
+        "① 別セクションの見出し",
+    ]
+    for para in headings[:2]:
+        fmt = para.paragraph_format
+        assert fmt.keep_with_next is False
+        assert fmt.keep_together is False
+        assert fmt.page_break_before is False
+        # Preserve widow/orphan control and all template-derived typography.
+        assert fmt.widow_control is True
+        assert para.runs[0].bold is True
+        assert para.style.name == headings[2].style.name
+        assert para.runs[0].font.size == headings[2].runs[0].font.size
+        assert "・" not in para.text
+        assert para._p.pPr is None or para._p.pPr.numPr is None
+    assert headings[2].paragraph_format.keep_with_next is True
+    assert headings[2].paragraph_format.keep_together is True
+    assert headings[2].paragraph_format.page_break_before is None
+
+
+def test_self_pr_first_line_indent_for_each_paragraph(sample_template):
+    from docx.shared import Pt
+
+    source = (
+        "■ 職務要約\n\n要約の最初です。\n\n"
+        "■ 自己PR\n\n"
+        "私の強みは、正確な情報管理です。\n\n"
+        "前職では、予約情報の確認を行いました。\n\n"
+        "具体的には、予約表と変更記録を照合しました。\n\n"
+        "今後も、正確な事務処理を心がけます。\n\n以上"
+    )
+    doc = render_docx(parse_markdown(source))
+    paragraphs = [p for p in doc.paragraphs if p.text in (
+        "私の強みは、正確な情報管理です。",
+        "前職では、予約情報の確認を行いました。",
+        "具体的には、予約表と変更記録を照合しました。",
+        "今後も、正確な事務処理を心がけます。",
+    )]
+    assert len(paragraphs) == 4
+    for p in paragraphs:
+        assert p.paragraph_format.first_line_indent == Pt(10.5)
+        assert p.paragraph_format.space_before == Pt(0)
+        assert p.paragraph_format.space_after == Pt(0)
+        assert all(run.bold is False for run in p.runs if run.text)
+    heading = next(p for p in doc.paragraphs if p.text == "■ 自己PR")
+    end = next(p for p in doc.paragraphs if p.text == "以上")
+    summary = next(p for p in doc.paragraphs if p.text == "要約の最初です。")
+    assert heading.paragraph_format.first_line_indent != Pt(10.5)
+    assert end.paragraph_format.first_line_indent != Pt(10.5)
+    assert summary.paragraph_format.first_line_indent == Pt(0)
+
+
 def test_resume_creation_date_replaces_duplicates_and_preserves_body(sample_template, monkeypatch):
     from datetime import date
 
