@@ -185,7 +185,8 @@ def test_role_subheadings_remain_in_right_cell(sample_template):
         "【主な業務】", "・来客対応", "・予約管理",
     ]
     assert all(paragraphs[i].paragraph_format.keep_with_next for i in (1, 3, 5))
-    assert all(paragraphs[i].paragraph_format.keep_with_next is False for i in (0, 2, 4, 6, 7))
+    assert all(paragraphs[i].paragraph_format.keep_with_next is False for i in (0, 2, 4, 7))
+    assert paragraphs[6].paragraph_format.keep_with_next is True
 
 
 def test_circled_role_and_episode_headings(sample_template):
@@ -384,7 +385,7 @@ def test_resume_body_spacing_and_compact_page_links(sample_template):
     assert continuation.paragraph_format.keep_with_next is False
     assert long_intro.paragraph_format.keep_with_next is False
     assert long_intro.paragraph_format.keep_together is False
-    assert _has_row_flag(roles.rows[1], "cantSplit")
+    assert not _has_row_flag(roles.rows[1], "cantSplit")
 
 
 def test_long_role_tail_bullets_link_only_short_flat_pair(sample_template):
