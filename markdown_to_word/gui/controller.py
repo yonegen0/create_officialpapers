@@ -38,6 +38,7 @@ class Controller:
 
     def _error(self, exc: BaseException) -> None:
         self.view.set_status("エラーが発生しました")
+        self.view.mark_previous_output()
         dialogs.error("処理できませんでした", str(exc), self.view.root)
 
     def invalidate(self, *args) -> None:
@@ -79,6 +80,8 @@ class Controller:
     def generate(self) -> None:
         if self.busy:
             return
+        # A new attempt is not a new success; preserve only the previous file link.
+        self.view.mark_previous_output()
         if self.preview is None:
             dialogs.info("事前確認", "先に「事前確認」を実行してください。", self.view.root)
             return
@@ -100,6 +103,7 @@ class Controller:
                 choice = dialogs.conflict(self.view.root, path)
                 if choice == "cancel":
                     self.view.set_status("保存をキャンセルしました")
+                    self.view.mark_previous_output()
                     return
                 if choice == "rename":
                     path = numbered_path(path)
