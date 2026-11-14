@@ -141,7 +141,7 @@ def test_gui_batch_selection_preview_generation_and_paste_compatibility(tmp_path
         from markdown_to_word.gui import controller
         paths = [tmp_path / f"企業{i}.md" for i in range(3)]
         for index, path in enumerate(paths):
-            path.write_text(f"# 会社{index}\\n\\n本文", encoding="utf-8")
+            path.write_text(f"# 会社{index}\n\n本文", encoding="utf-8")
         view.style.set("標準文書")
         files = tuple(str(path) for path in paths)
         monkeypatch.setattr(controller.filedialog, "askopenfilenames", lambda **kw: files)
