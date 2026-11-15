@@ -75,6 +75,8 @@ def setup(root: tk.Tk) -> None:
         style.theme_use("clam")
 
     style.configure("App.TFrame", background=colors["bg"])
+    style.configure("App.TNotebook", background=colors["bg"], borderwidth=0)
+    style.configure("App.TNotebook.Tab", font=(family, 10, "bold"), padding=(px(root, 18), px(root, 10)))
     style.configure("Header.TFrame", background=colors["header"])
     style.configure("Card.TFrame", background=colors["card"])
     style.configure("Metric.TFrame", background=colors["card"] if native else ACCENT_SOFT)

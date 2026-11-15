@@ -16,7 +16,7 @@ def info(title: str, message: str, parent) -> None:
     messagebox.showinfo(title, message, parent=parent)
 
 
-def conflict(parent, filename: str | Path) -> str:
+def conflict(parent, filename: str | Path, *, kind: str = "Word") -> str:
     """Return 'replace', 'rename' or 'cancel'; the initial/safe choice is cancel."""
     window = tk.Toplevel(parent)
     window.withdraw()
@@ -32,7 +32,7 @@ def conflict(parent, filename: str | Path) -> str:
     frame = ttk.Frame(window, style="Card.TFrame", padding=px(parent, 18))
     frame.pack(fill="both", expand=True)
     ttk.Label(
-        frame, text="同名のWordファイルが存在します。",
+        frame, text=f"同名の{kind}ファイルが存在します。",
         style="Section.TLabel",
     ).pack(anchor="w")
     ttk.Label(frame, text="保存先（長い場合は左右にスクロールできます）", style="CardMuted.TLabel").pack(
