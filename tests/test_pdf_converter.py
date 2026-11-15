@@ -159,6 +159,9 @@ def test_startup_failure_is_not_counted_as_file_failure(tmp_path):
         def __enter__(self):
             raise WordConnectionError("Microsoft Wordを起動できません。")
 
+        def __exit__(self, *args):
+            pass
+
     result = convert_pdf_files((file,), tmp_path, session_factory=CannotStart)
     assert result.processed == 0 and result.total == 1
     assert not result.saved and not result.failures and not result.warnings
