@@ -24,6 +24,7 @@ class PdfBatchResult:
     saved: tuple[Path, ...]
     failures: tuple[tuple[Path, str], ...]
     stopped_reason: str | None = None
+    warnings: tuple[tuple[Path, str], ...] = ()
 
 
 _FATAL_HRESULTS = {0x80010108, 0x800706BA, 0x80010001, 0x80010105, 0x800401FD}
@@ -65,7 +66,10 @@ class WordSession:
             import win32com.client
         except ImportError as exc:
             raise WordConnectionError("PDF変換に必要なpywin32が利用できません。") from exc
-        pythoncom.CoInitialize()
+        try:
+            pythoncom.CoInitialize()
+        except Exception as exc:
+            raise WordConnectionError("WordのCOM接続を初期化できませんでした。") from exc
         self._pythoncom = pythoncom
         try:
             self.app = win32com.client.DispatchEx("Word.Application")
@@ -75,7 +79,7 @@ class WordSession:
             self.app.AutomationSecurity = 3
         except Exception as exc:
             self.__exit__(None, None, None)
-            raise WordConnectionError("Microsoft Wordを起動できません。デスクトップ版Wordのインストールを確認してください。") from exc
+            raise WordConnectionError("Microsoft Wordを起動できません。") from exc
         return self
 
     def export(self, source: Path, temp: Path) -> None:
@@ -140,6 +144,7 @@ def convert_pdf_files(
         validate_pdf_name(output_name or files[0].stem + ".pdf")
     saved: list[Path] = []
     failures: list[tuple[Path, str]] = []
+    warnings: list[tuple[Path, str]] = []
     reserved: set[str] = set()
     processed = 0
     stopped_reason = None
@@ -159,7 +164,7 @@ def convert_pdf_files(
                     result = finalize_pdf(
                         temp, destination, replace=replace and len(files) == 1,
                         expected=expected, auto_rename=len(files) > 1 or not replace and destination.exists(),
-                        reserved=reserved,
+                        reserved=reserved, cleanup_temp=False,
                     )
                     saved.append(result)
                 except Exception as error:
@@ -168,7 +173,14 @@ def convert_pdf_files(
                         stopped_reason = "Wordとの接続が不安定なため、残りの変換を停止しました。"
                 finally:
                     if temp is not None:
-                        temp.unlink(missing_ok=True)
+                        try:
+                            temp.unlink(missing_ok=True)
+                        except OSError as cleanup_error:
+                            warnings.append((
+                                source,
+                                f"一時PDF「{temp.name}」を削除できませんでした（{cleanup_error}）。"
+                                "保存済みPDFの結果には影響しません。",
+                            ))
                 processed += 1
                 if progress is not None:
                     progress(processed, len(files), source.name, len(saved), len(failures))
@@ -179,4 +191,5 @@ def convert_pdf_files(
     return PdfBatchResult(
         folder=folder, total=len(files), processed=processed,
         saved=tuple(saved), failures=tuple(failures), stopped_reason=stopped_reason,
+        warnings=tuple(warnings),
     )
