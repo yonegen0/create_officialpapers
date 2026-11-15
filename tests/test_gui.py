@@ -198,3 +198,68 @@ def test_gui_batch_selection_preview_generation_and_paste_compatibility(tmp_path
         assert str(view.name_entry.cget("state")) == "normal"
     finally:
         view.controller.close()
+
+
+def test_pdf_tab_preserves_markdown_state_and_shares_busy(tmp_path, monkeypatch):
+    root, view = _window()
+    try:
+        import threading
+        from markdown_to_word.gui import pdf_controller
+        from markdown_to_word.pdf_converter import PdfBatchResult
+        document = tmp_path / "職務経歴書.docx"
+        document.write_bytes(b"old Word")
+        view.input_mode.set("paste")
+        view.input_text.insert("1.0", "# Wordタブの入力")
+        view.output_name.set("word-result.docx")
+        root.update()
+        assert len(view.notebook.tabs()) == 2
+        assert view.notebook.tab(0, "text") == "Markdown → Word"
+        assert view.notebook.tab(1, "text") == "Word → PDF"
+        assert view.notebook.index("current") == 0
+        monkeypatch.setattr(
+            pdf_controller.filedialog, "askopenfilenames", lambda **kwargs: (str(document), str(document)),
+        )
+        view.controller.pdf.choose_files()
+        assert view.pdf_tab.file_count.get() == "1件選択中"
+        assert view.pdf_tab.output_dir.get() == str(tmp_path)
+        view.notebook.select(1)
+        root.update()
+        assert view.input_text.get("1.0", "end-1c") == "# Wordタブの入力"
+        release = threading.Event()
+        def mock_convert(files, folder, **kwargs):
+            release.wait(5)
+            output = folder / "職務経歴書.pdf"
+            output.write_bytes(b"%PDF-1.7\n%%EOF")
+            return PdfBatchResult(folder, 1, 1, (output,), ())
+        monkeypatch.setattr(pdf_controller, "convert_pdf_files", mock_convert)
+        view.controller.pdf.convert()
+        assert view.controller.busy
+        assert str(view.pdf_tab.convert_button.cget("state")) == "disabled"
+        assert str(view.generate_button.cget("state")) == "disabled"
+        assert str(view.file_button.cget("state")) == "disabled"
+        assert str(view.pdf_tab.name_entry.cget("state")) == "disabled"
+        view.controller.generate()  # Must not start a second job while PDF is running.
+        assert view.controller.busy
+        release.set()
+        for _ in range(200):
+            root.update()
+            if not view.controller.busy:
+                break
+            time.sleep(0.01)
+        assert not view.controller.busy
+        assert str(view.pdf_tab.convert_button.cget("state")) == "normal"
+        assert str(view.pdf_tab.open_button.cget("state")) == "normal"
+        assert view.input_text.get("1.0", "end-1c") == "# Wordタブの入力"
+        assert view.output_name.get() == "word-result.docx"
+        view.notebook.select(0)
+        assert view.pdf_tab.result.get().startswith("PDF変換完了")
+        assert document.read_bytes() == b"old Word"
+    finally:
+        if view.controller.busy:
+            release.set()
+            for _ in range(200):
+                root.update()
+                if not view.controller.busy:
+                    break
+                time.sleep(0.01)
+        view.controller.close()

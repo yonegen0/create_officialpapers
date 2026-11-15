@@ -8,6 +8,7 @@ from tkinter import ttk
 
 from . import dialogs
 from .controller import Controller
+from .pdf_view import PdfTab
 from .visuals import (
     ACCENT, ACCENT_SOFT, BG, BORDER, MUTED, TEXT, WARNING, WHITE,
     Card, px, setup,
@@ -48,14 +49,14 @@ class TkView:
         self.root.protocol("WM_DELETE_WINDOW", self.controller.close)
 
     def _build(self) -> None:
-        self.root.title("Markdown → Word 変換ツール")
+        self.root.title("書類変換ツール")
         colors = self.root._word_colors
         margin = px(self.root, 20)
 
         header = ttk.Frame(self.root, style="Header.TFrame", padding=(margin, px(self.root, 14)))
         header.pack(side="top", fill="x")
-        ttk.Label(header, text="Markdown → Word 変換ツール", style="HeaderTitle.TLabel").pack(anchor="w")
-        ttk.Label(header, text="編集可能なWord文書をかんたん作成", style="HeaderSub.TLabel").pack(anchor="w")
+        ttk.Label(header, text="書類変換ツール", style="HeaderTitle.TLabel").pack(anchor="w")
+        ttk.Label(header, text="MarkdownからWordを作成・WordをPDFに変換", style="HeaderSub.TLabel").pack(anchor="w")
         ttk.Label(header, text="ファイルはこのPC内だけで処理します", style="HeaderSub.TLabel").pack(anchor="w", pady=(px(self.root, 3), 0))
         ttk.Frame(self.root, height=px(self.root, 3), style="HeaderRule.TFrame").pack(side="top", fill="x")
 
@@ -72,8 +73,13 @@ class TkView:
         self.exit_button = ttk.Button(footer, text="終了", style="App.TButton")
         self.exit_button.grid(row=0, column=3)
 
-        body = ttk.Frame(self.root, style="App.TFrame")
-        body.pack(fill="both", expand=True)
+        self.notebook = ttk.Notebook(self.root, style="App.TNotebook")
+        self.notebook.pack(fill="both", expand=True)
+        body = ttk.Frame(self.notebook, style="App.TFrame")
+        self.notebook.add(body, text="Markdown → Word")
+        pdf_frame = ttk.Frame(self.notebook, style="App.TFrame")
+        self.notebook.add(pdf_frame, text="Word → PDF")
+        self.pdf_tab = PdfTab(pdf_frame, self.root)
         self.canvas = tk.Canvas(
             body, background=colors["bg"], borderwidth=0, highlightthickness=0,
             takefocus=0,
@@ -379,7 +385,8 @@ class TkView:
             return None
         if event.widget is self.input_text:
             return "break"
-        self.canvas.yview_scroll(-int(event.delta / 120) if event.delta else 0, "units")
+        canvas = self.pdf_tab.canvas if self.notebook.index("current") == 1 else self.canvas
+        canvas.yview_scroll(-int(event.delta / 120) if event.delta else 0, "units")
         return "break"
 
     def _help(self):
@@ -389,7 +396,9 @@ class TkView:
             "② 文書スタイル、出力ファイル名、保存先を設定する\n"
             "③ 事前確認を実行し、Wordを生成する\n\n"
             "複数選択時は各ファイルを個別のWordへ生成し、同名なら自動連番します。\n"
-            "単体生成では置換・別名保存・キャンセルを選べます。",
+            "単体生成では置換・別名保存・キャンセルを選べます。\n\n"
+            "Word → PDFタブでは.docxを選び、保存先を指定してPDFへ変換します。"
+            "この機能はデスクトップ版Microsoft Wordが必要です。",
             self.root,
         )
 
@@ -452,6 +461,7 @@ class TkView:
                  bool(self.controller.last_batch_result.saved))
         self.open_button.configure(state="normal" if not busy and single else "disabled")
         self.open_folder_button.configure(state="normal" if not busy and (single or batch) else "disabled")
+        self.pdf_tab.set_busy(busy)
         if busy:
             self.mark_previous_output()
             self.progress.start(14)

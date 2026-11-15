@@ -12,6 +12,7 @@ from ..models import Preview
 from ..output import numbered_path
 from ..service import prepare, convert, read_file
 from .dispatcher import Dispatcher
+from .pdf_controller import PdfController
 from . import dialogs
 
 
@@ -27,6 +28,36 @@ class Controller:
         self.last_output: Path | None = None
         self.last_batch_result: BatchResult | None = None
         self.last_result_kind: str | None = None
+        self.pdf = PdfController(self)
+
+    def submit_job(self, work, finish, message: str) -> None:
+        """One executor and one busy guard for Word generation and PDF conversion."""
+        if self.busy:
+            return
+        self.busy = True
+        self.view.set_busy(True)
+        self.view.set_status(message)
+        try:
+            future = self.worker.submit(work)
+        except Exception:
+            self.busy = False
+            self.view.set_busy(False)
+            raise
+
+        def done(f):
+            try:
+                outcome = (f.result(), None)
+            except Exception as exc:
+                outcome = (None, exc)
+
+            def deliver():
+                self.busy = False
+                self.view.set_busy(False)
+                finish(*outcome)
+
+            self.dispatcher.post(deliver)
+
+        future.add_done_callback(done)
 
     def is_batch(self) -> bool:
         return self.view.input_mode.get() == "file" and len(self.selected_files) > 1
@@ -105,20 +136,12 @@ class Controller:
             self.batch_previews = None
             paths = self.selected_files
             style = self.view.style.get()
-            self.busy = True
             self.view.clear_preview()
-            self.view.set_busy(True)
-            self.view.set_status(f"{len(paths)}件のMarkdownを確認しています…")
-            future = self.worker.submit(prepare_batch, paths, style, self._progress("事前確認"))
-
-            def done(f):
-                try:
-                    result = (f.result(), None)
-                except Exception as exc:
-                    result = (None, exc)
-                self.dispatcher.post(lambda result=result: self._finish_batch_preview(*result))
-
-            future.add_done_callback(done)
+            self.submit_job(
+                lambda: prepare_batch(paths, style, self._progress("事前確認")),
+                self._finish_batch_preview,
+                f"{len(paths)}件のMarkdownを確認しています…",
+            )
             return
         try:
             self.batch_previews = None
@@ -131,8 +154,6 @@ class Controller:
             self._error(exc)
 
     def _finish_batch_preview(self, items: tuple[BatchItem, ...] | None, exc: BaseException | None) -> None:
-        self.busy = False
-        self.view.set_busy(False)
         if exc is not None:
             self._error(exc)
             return
@@ -183,19 +204,13 @@ class Controller:
         except (OSError, ConversionError) as exc:
             self._error(exc)
             return
-        self.busy = True
-        self.view.set_busy(True)
-        self.view.set_status("Wordを生成しています…")
-        future = self.worker.submit(convert, preview, content, self.view.style.get(), self.view.input_mode.get(), path, replace=replace)
-
-        def done(f):
-            try:
-                output = f.result()
-                outcome = (output, None)
-            except Exception as exc:
-                outcome = (None, exc)
-            self.dispatcher.post(lambda outcome=outcome: self._finish(*outcome))
-        future.add_done_callback(done)
+        style = self.view.style.get()
+        mode = self.view.input_mode.get()
+        self.submit_job(
+            lambda: convert(preview, content, style, mode, path, replace=replace),
+            self._finish,
+            "Wordを生成しています…",
+        )
 
     def _generate_batch(self) -> None:
         items = self.batch_previews
@@ -214,23 +229,13 @@ class Controller:
             self._error(ConversionError("保存先フォルダーが存在しません。"))
             return
         style = self.view.style.get()
-        self.busy = True
-        self.view.set_busy(True)
-        self.view.set_status(f"{len(items)}件のWordを生成しています…")
-        future = self.worker.submit(convert_batch, items, style, folder, self._progress("生成"))
-
-        def done(f):
-            try:
-                outcome = (f.result(), None)
-            except Exception as exc:
-                outcome = (None, exc)
-            self.dispatcher.post(lambda outcome=outcome: self._finish_batch(*outcome))
-
-        future.add_done_callback(done)
+        self.submit_job(
+            lambda: convert_batch(items, style, folder, self._progress("生成")),
+            self._finish_batch,
+            f"{len(items)}件のWordを生成しています…",
+        )
 
     def _finish_batch(self, result: BatchResult | None, exc: BaseException | None) -> None:
-        self.busy = False
-        self.view.set_busy(False)
         if exc is not None:
             self._error(exc)
             return
@@ -244,8 +249,6 @@ class Controller:
         )
 
     def _finish(self, result: Path | None, exc: BaseException | None) -> None:
-        self.busy = False
-        self.view.set_busy(False)
         if exc:
             self._error(exc)
         else:
