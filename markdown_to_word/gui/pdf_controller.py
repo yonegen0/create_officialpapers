@@ -98,9 +98,14 @@ class PdfController:
         assert result is not None
         self.last_result = result
         self.view.show_result(result)
-        self.owner.view.set_status(
-            f"PDF変換{'停止' if result.stopped_reason else '完了'}：成功 {len(result.saved)}件・失敗 {len(result.failures)}件"
-        )
+        if result.processed == 0 and result.stopped_reason:
+            self.owner.view.set_status("PDF変換を開始できませんでした")
+        else:
+            self.owner.view.set_status(
+                f"PDF変換{'停止' if result.stopped_reason else '完了'}："
+                f"成功 {len(result.saved)}件・失敗 {len(result.failures)}件"
+                + (f"・警告 {len(result.warnings)}件" if result.warnings else "")
+            )
 
     def open_pdf(self) -> None:
         if not self.last_result or len(self.last_result.saved) != 1 or self.last_result.total != 1:

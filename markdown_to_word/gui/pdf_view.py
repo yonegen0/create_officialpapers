@@ -150,19 +150,31 @@ class PdfTab:
     def mark_previous(self):
         if self.controller and self.controller.last_result:
             prior = self.controller.last_result
-            self.result.set(f"前回の変換結果：成功 {len(prior.saved)}件・失敗 {len(prior.failures)}件")
+            summary = f"前回の変換結果：成功 {len(prior.saved)}件・失敗 {len(prior.failures)}件"
+            if prior.warnings:
+                summary += f"・警告 {len(prior.warnings)}件"
+            self.result.set(summary)
 
     def show_result(self, result):
-        lines = [
-            f"PDF変換{'停止' if result.stopped_reason else '完了'}：{result.total}件中"
-            f"{len(result.saved)}件成功・{len(result.failures)}件失敗"
-        ]
-        lines.extend(f"成功：{path.name}" for path in result.saved)
-        lines.extend(f"失敗：{path.name} — {reason}" for path, reason in result.failures)
-        if result.stopped_reason:
-            lines.append(f"処理停止：{result.stopped_reason}")
+        if result.processed == 0 and result.stopped_reason:
+            lines = ["PDF変換を開始できませんでした", result.stopped_reason]
+            if "Microsoft Wordを起動できません" in result.stopped_reason:
+                lines.append("デスクトップ版Microsoft Wordがインストールされているか確認してください。")
+            lines.append("変換開始前に停止しました。選択したWordファイルは変更されていません。")
+        else:
+            lines = [
+                f"PDF変換{'停止' if result.stopped_reason else '完了'}：{result.total}件中"
+                f"{len(result.saved)}件成功・{len(result.failures)}件失敗"
+            ]
+            lines.extend(f"成功：{path.name}" for path in result.saved)
+            lines.extend(f"失敗：{path.name} — {reason}" for path, reason in result.failures)
+            if result.stopped_reason:
+                lines.append(f"処理停止：{result.stopped_reason}")
         if result.processed < result.total:
             lines.append(f"未処理：{result.total - result.processed}件")
+        if result.warnings:
+            lines.append(f"一時PDFの後始末に関する警告：{len(result.warnings)}件")
+            lines.extend(f"警告：{path.name} — {reason}" for path, reason in result.warnings)
         lines.append(f"保存先：{result.folder}")
         self.result.set("\n".join(lines))
         self._result_actions()

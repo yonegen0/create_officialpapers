@@ -1,6 +1,6 @@
 # 書類変換ツール
 
-**バージョン 0.2.0｜Windows 11 / Python 3.13｜完全ローカル**
+**バージョン 0.2.1｜Windows 11 / Python 3.13｜完全ローカル**
 
 Markdownから**編集可能なWord（.docx）**を生成し、デスクトップ版Microsoft Wordを使って**既存WordをPDFへ変換**する独立したデスクトップアプリです。職務経歴書向けの日本語レイアウトと自然な改ページを重視しています。求人比較ツールのブルー系デザインを参考にした、固定ヘッダー・固定フッターと3ステップの1画面UIを採用しています。既存リポジトリとは独立して動作します。
 
@@ -33,7 +33,7 @@ PDF変換は**Windows 11上のデスクトップ版Microsoft Wordが必要**で�
 
 ## Windows 11で使う（EXE配布版）
 
-1. [GitHub Releases](https://github.com/yonegen0/create_officialpapers/releases) またはWindows配布ワークフローから取得した `MarkdownToWord-0.2.0-win-x64.zip` を展開します。
+1. [GitHub Releases](https://github.com/yonegen0/create_officialpapers/releases) またはWindows配布ワークフローから取得した `MarkdownToWord-0.2.1-win-x64.zip` を展開します。
 2. `MarkdownToWord\MarkdownToWord.exe` をダブルクリックします。
 3. **STEP 1：Markdownを入力** — 1ファイルまたはCtrl/Shiftキーで複数ファイルを選択するか、文章を直接貼り付けます。
 4. **STEP 2：Wordの出力設定** — 文書スタイルと保存先を指定します。1件または貼り付け時はファイル名を編集でき、一括生成時は元ファイル名が使用されます。
@@ -86,7 +86,7 @@ py -3.13 -m venv .venv
 1. Windows 11 x64に**Python 3.13 x64**をインストールし、`py -3.13` を利用可能にします。
 2. プロジェクトのルートで `build_release.bat` をダブルクリックするか、コマンドプロンプトで実行します。
 3. 最小限のpytestに成功すると、PyInstallerによる`onedir`ビルドが実行されます。
-4. `release\MarkdownToWord-0.2.0-win-x64.zip` が作成されます。
+4. `release\MarkdownToWord-0.2.1-win-x64.zip` が作成されます。
 
 `onedir` 配布なので、ZIP内の EXE **だけを取り出さず**、フォルダー全体を展開して使います。Pythonの導入は配布先PCでは不要です。Markdown → Word生成にMicrosoft Wordは不要ですが、Word → PDF変換にはデスクトップ版Microsoft Wordが必要です。
 

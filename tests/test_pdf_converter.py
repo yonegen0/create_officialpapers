@@ -122,3 +122,81 @@ def test_word_session_initializes_and_releases_com_on_same_thread(monkeypatch, t
     assert calls[4] == ("close", {"SaveChanges": 0})
     assert calls[5] == ("quit", {"SaveChanges": 0})
     assert app.AutomationSecurity == 3
+
+
+
+def test_temp_cleanup_warning_does_not_fail_saved_pdfs_or_stop_batch(tmp_path, monkeypatch):
+    files = tuple(tmp_path / f"sample{i}.docx" for i in range(2))
+    for source in files:
+        source.write_bytes(b"untouched Word")
+    real_unlink = Path.unlink
+    session = FakeSession()
+
+    def deny_temp_cleanup(path, *args, **kwargs):
+        if path.name.startswith(".mtw-pdf-"):
+            raise PermissionError("locked by Windows")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", deny_temp_cleanup)
+    result = convert_pdf_files(files, tmp_path, session_factory=lambda: session)
+    assert result.processed == result.total == 2
+    assert len(result.saved) == 2 and len(result.failures) == 0
+    assert len(result.warnings) == 2
+    assert all("一時PDF" in warning for _, warning in result.warnings)
+    assert result.stopped_reason is None
+    assert session.opened == list(files) and session.closed
+    assert all(path.read_bytes() == b"untouched Word" for path in files)
+    assert all(path.read_bytes() == PDF for path in result.saved)
+
+
+def test_startup_failure_is_not_counted_as_file_failure(tmp_path):
+    from markdown_to_word.gui.pdf_view import PdfTab
+
+    file = tmp_path / "not_processed.docx"
+    file.write_bytes(b"original")
+
+    class CannotStart:
+        def __enter__(self):
+            raise WordConnectionError("Microsoft Wordを起動できません。")
+
+        def __exit__(self, *args):
+            pass
+
+    result = convert_pdf_files((file,), tmp_path, session_factory=CannotStart)
+    assert result.processed == 0 and result.total == 1
+    assert not result.saved and not result.failures and not result.warnings
+    assert result.stopped_reason is not None
+    output = []
+    view = SimpleNamespace(
+        result=SimpleNamespace(set=output.append),
+        _result_actions=lambda: None,
+    )
+    PdfTab.show_result(view, result)
+    message = output[0]
+    assert "PDF変換を開始できませんでした" in message
+    assert "デスクトップ版Microsoft Word" in message
+    assert "未処理：1件" in message
+    assert "0件失敗" not in message
+    assert file.read_bytes() == b"original"
+
+
+def test_stopped_batch_has_consistent_processed_and_unprocessed_counts(tmp_path):
+    from markdown_to_word.gui.pdf_view import PdfTab
+
+    files = tuple(tmp_path / f"{name}.docx" for name in ("ok", "fatal", "later"))
+    for file in files:
+        file.write_bytes(b"original")
+    session = FakeSession({"fatal.docx": WordConnectionError("connection lost")})
+    result = convert_pdf_files(files, tmp_path, session_factory=lambda: session)
+    assert result.processed == 2 and result.total == 3
+    assert len(result.saved) == 1 and len(result.failures) == 1
+    assert len(result.warnings) == 0
+    output = []
+    view = SimpleNamespace(
+        result=SimpleNamespace(set=output.append),
+        _result_actions=lambda: None,
+    )
+    PdfTab.show_result(view, result)
+    assert "3件中1件成功・1件失敗" in output[0]
+    assert "未処理：1件" in output[0]
+    assert files[2].read_bytes() == b"original"

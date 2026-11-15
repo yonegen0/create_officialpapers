@@ -80,15 +80,23 @@ def _publish_new(temp: Path, target: Path) -> None:
         # Some Windows/network filesystems disallow hard links. Preserve O_EXCL.
         if exc.errno not in (errno.EPERM, errno.EACCES, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV, errno.EINVAL):
             raise
+        # The target is ours only after the exclusive open succeeded.
+        # Flush and close errors must receive the same cleanup as copy errors.
+        created = False
         try:
             with temp.open("rb") as source, target.open("xb") as output:
+                created = True
+                shutil.copyfileobj(source, output)
+                output.flush()
+        except BaseException as error:
+            if created:
                 try:
-                    shutil.copyfileobj(source, output)
-                except BaseException:
-                    output.close()
                     target.unlink(missing_ok=True)
-                    raise
-        except FileExistsError:
+                except OSError as cleanup_error:
+                    raise PdfOutputError(
+                        f"PDF保存に失敗しました（{error}）。"
+                        f"未完成PDF「{target.name}」も削除できませんでした（{cleanup_error}）。"
+                    ) from error
             raise
 
 
@@ -100,6 +108,7 @@ def finalize_pdf(
     expected: tuple[int, int, int] | None = None,
     auto_rename: bool = False,
     reserved: set[str] | None = None,
+    cleanup_temp: bool = True,
 ) -> Path:
     verify_pdf(temp)
     reserved = reserved if reserved is not None else set()
@@ -120,6 +129,9 @@ def finalize_pdf(
             reserved.add(str(candidate).casefold())
             continue
         reserved.add(str(candidate).casefold())
-        temp.unlink(missing_ok=True)
+        # Batch conversion owns cleanup so a locked temporary PDF cannot turn
+        # an already-published result into a per-file failure.
+        if cleanup_temp:
+            temp.unlink(missing_ok=True)
         return candidate
     raise PdfOutputError("保存可能なPDFファイル名を見つけられませんでした。")
