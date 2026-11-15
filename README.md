@@ -1,8 +1,8 @@
-# Markdown → Word 変換ツール
+# 書類変換ツール
 
-**バージョン 0.1.0｜Windows 11 / Python 3.13｜完全ローカル**
+**バージョン 0.2.0｜Windows 11 / Python 3.13｜完全ローカル**
 
-Markdownファイルまたは直接貼り付けた文章から、**編集可能なWord（.docx）**を生成する独立したデスクトップアプリです。職務経歴書向けの日本語レイアウトと自然な改ページを重視しています。求人比較ツールのブルー系デザインを参考にした、固定ヘッダー・固定フッターと3ステップの1画面UIを採用しています。既存リポジトリとは独立して動作します。
+Markdownから**編集可能なWord（.docx）**を生成し、デスクトップ版Microsoft Wordを使って**既存WordをPDFへ変換**する独立したデスクトップアプリです。職務経歴書向けの日本語レイアウトと自然な改ページを重視しています。求人比較ツールのブルー系デザインを参考にした、固定ヘッダー・固定フッターと3ステップの1画面UIを採用しています。既存リポジトリとは独立して動作します。
 
 ## 主な機能
 
@@ -16,9 +16,24 @@ Markdownファイルまたは直接貼り付けた文章から、**編集可能�
 - 同名ファイル時は「置換」「別名」「キャンセル」を選択。既存出力を生成前に削除しない
 - Word関連付けアプリで開く、保存先を開く（Windows）
 
+
+## Word → PDF変換（新しいタブ）
+
+画面上部で「Word → PDF」を選択すると、次の手順で変換できます。
+
+1. **STEP 1**：「Wordファイルを選択…」から .docx を1件またはCtrl/Shiftで複数選びます。重複指定は除外し、選択をキャンセルしても前の選択が残ります。
+2. **STEP 2**：保存先フォルダーを確認します。初期値は最初のWordの親フォルダー。1件ならPDF名を編集でき、一括なら元Word名を使います。
+3. **STEP 3**：「PDFに変換」または「PDFを○件まとめて変換」をクリックします。件数・ファイル名・失敗理由が表示され、単体は「PDFを開く」、成功時は「保存先を開く」が利用できます。
+
+PDF変換は**Windows 11上のデスクトップ版Microsoft Wordが必要**です。Wordがない場合でもアプリは起動し、Markdown → Word生成を利用できます。Word COMのExportAsFixedFormatによる出力を行い、元Wordは読み取り専用で開いて保存せずに閉じます。ユーザーが起動したWordを強制終了しません。
+
+既存PDFとの重複があれば、単体では「置換する」「別名で保存」「キャンセル」（初期選択）を確認します。一括では既存PDFを上書きせず `(1)` `(2)` の連番で保存します。まず一時PDFを生成・確認した後で正式保存するため、出力失敗時に既存PDFを先に削除しません。
+
+2タブの入力・結果・スクロール位置は独立します。処理中は双方の編集・ファイル選択と終了を抑止し、共有ワーカーで同時処理しません。**Word COMが応答しなくなった場合の完全自動復旧は保証しません**。実際のWordが利用できるWindows実機でPDFの表・罫線・改ページを確認してください。
+
 ## Windows 11で使う（EXE配布版）
 
-1. [GitHub Releases](https://github.com/yonegen0/create_officialpapers/releases) またはWindows配布ワークフローから取得した `MarkdownToWord-0.1.0-win-x64.zip` を展開します。
+1. [GitHub Releases](https://github.com/yonegen0/create_officialpapers/releases) またはWindows配布ワークフローから取得した `MarkdownToWord-0.2.0-win-x64.zip` を展開します。
 2. `MarkdownToWord\MarkdownToWord.exe` をダブルクリックします。
 3. **STEP 1：Markdownを入力** — 1ファイルまたはCtrl/Shiftキーで複数ファイルを選択するか、文章を直接貼り付けます。
 4. **STEP 2：Wordの出力設定** — 文書スタイルと保存先を指定します。1件または貼り付け時はファイル名を編集でき、一括生成時は元ファイル名が使用されます。
@@ -71,9 +86,9 @@ py -3.13 -m venv .venv
 1. Windows 11 x64に**Python 3.13 x64**をインストールし、`py -3.13` を利用可能にします。
 2. プロジェクトのルートで `build_release.bat` をダブルクリックするか、コマンドプロンプトで実行します。
 3. 最小限のpytestに成功すると、PyInstallerによる`onedir`ビルドが実行されます。
-4. `release\MarkdownToWord-0.1.0-win-x64.zip` が作成されます。
+4. `release\MarkdownToWord-0.2.0-win-x64.zip` が作成されます。
 
-`onedir` 配布なので、ZIP内の EXE **だけを取り出さず**、フォルダー全体を展開して使います。Pythonの導入は配布先PCでは不要です。Microsoft Wordは生成に不要です。
+`onedir` 配布なので、ZIP内の EXE **だけを取り出さず**、フォルダー全体を展開して使います。Pythonの導入は配布先PCでは不要です。Markdown → Word生成にMicrosoft Wordは不要ですが、Word → PDF変換にはデスクトップ版Microsoft Wordが必要です。
 
 ## テスト
 
@@ -99,7 +114,7 @@ py -3.13 -m venv .venv
 - Wordファイルのページ数は実際のWord/LibreOffice側で確定します。Microsoft Wordとの表示差異があり得ます。
 - HTML/CSS、複雑なセル結合、画像レイアウト、数式、脚注は高度な変換対象外です。HTMLやコードは実行されません。
 - 高度なリストのネスト・番号形式、長い行の表分割、Web/ローカル画像の埋め込みは完全対応ではありません。
-- PDF同時出力・Wordの結合・フォルダー一括検索・Wordテンプレート取り込みは未対応です。
+- MarkdownからWordとPDFを同時生成する機能、PDF結合・圧縮、フォルダー一括検索・Wordテンプレート取り込みは未対応です。
 - **実際の応募書類や個人情報を公開GitHubリポジトリへコミットしないでください。** `docs/サンプル_架空.md` は架空の情報のみです。
 
 ## ディレクトリ
@@ -109,7 +124,9 @@ py -3.13 -m venv .venv
 - `markdown_to_word/docx_renderer.py`：スタイル別のWord出力振り分けと標準文書処理
 - `markdown_to_word/resume_template.py`：職務経歴書専用のテンプレート描画
 - `markdown_to_word/assets/resume_template.docx`：匿名化した職務経歴書の書式（同梱必須）
-- `markdown_to_word/output.py`：検証付きの安全な保存
+- `markdown_to_word/output.py`：Wordの安全な保存
+- `markdown_to_word/pdf_converter.py`：Word COMによるPDF変換
+- `markdown_to_word/pdf_output.py`：PDFの一時保存と衝突回避
 - `markdown_to_word/service.py`：2入力方式共通の処理
 - `markdown_to_word/gui/`：Tkinter画面と非同期制御
 - `tests/`：必要最小限のテスト

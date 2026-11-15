@@ -20,7 +20,7 @@ if not exist "dist\MarkdownToWord\MarkdownToWord.exe" (
  exit /b 1
 )
 if not exist release mkdir release
-powershell -NoProfile -Command "Compress-Archive -Path 'dist\MarkdownToWord' -DestinationPath 'release\MarkdownToWord-0.1.0-win-x64.zip' -Force"
+powershell -NoProfile -Command "Compress-Archive -Path 'dist\MarkdownToWord' -DestinationPath 'release\MarkdownToWord-0.2.0-win-x64.zip' -Force"
 if errorlevel 1 exit /b 1
-echo [OK] release\MarkdownToWord-0.1.0-win-x64.zip
+echo [OK] release\MarkdownToWord-0.2.0-win-x64.zip
 exit /b 0
