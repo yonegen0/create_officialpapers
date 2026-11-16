@@ -182,10 +182,13 @@ class PdfTab:
             lines.extend(f"警告：{path.name} — {reason}" for path, reason in result.warnings)
         lines.append(f"保存先：{result.folder}")
         self.result.set("\n".join(lines))
-        if result.stopped_reason and not result.saved:
-            self.result_label.configure(style="Error.TLabel")
-        elif result.failures or result.warnings or result.stopped_reason:
-            self.result_label.configure(style="Warning.TLabel")
-        else:
-            self.result_label.configure(style="Success.TLabel")
+        # Standalone formatting tests use a lightweight view without Tk widgets.
+        label = getattr(self, "result_label", None)
+        if label is not None:
+            if result.stopped_reason and not result.saved:
+                label.configure(style="Error.TLabel")
+            elif result.failures or result.warnings or result.stopped_reason:
+                label.configure(style="Warning.TLabel")
+            else:
+                label.configure(style="Success.TLabel")
         self._result_actions()
