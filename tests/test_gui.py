@@ -119,6 +119,7 @@ def test_busy_disables_editing_and_output_actions(tmp_path):
         view.show_success(path)
 
         view.set_busy(True)
+        assert view.progress.winfo_manager() == "place"
         assert str(view.name_entry.cget("state")) == "disabled"
         assert str(view.dir_entry.cget("state")) == "disabled"
         assert str(view.input_text.cget("state")) == "disabled"
@@ -127,6 +128,7 @@ def test_busy_disables_editing_and_output_actions(tmp_path):
         assert "前回生成したWordファイル" in view.success.get()
 
         view.set_busy(False)
+        assert view.progress.winfo_manager() == ""
         assert str(view.input_text.cget("state")) == "normal"
         assert str(view.style_combo.cget("state")) == "readonly"
         assert str(view.open_button.cget("state")) == "normal"
