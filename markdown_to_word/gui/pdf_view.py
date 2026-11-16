@@ -5,7 +5,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 
-from .visuals import Card, px
+from .visuals import Card, px, step_heading
 
 
 class PdfTab:
@@ -68,10 +68,12 @@ class PdfTab:
         self.dir_entry.pack(side="left", expand=True, fill="x")
 
         card = self._card("STEP 3  PDFに変換")
-        ttk.Label(
+        self.description = ttk.Label(
             card, text="Microsoft Wordを使用して印刷レイアウトをPDF化します。元のWordは変更しません。",
-            style="CardMuted.TLabel", wraplength=700,
-        ).pack(anchor="w", pady=(0, px(root, 10)))
+            style="CardMuted.TLabel", justify="left",
+        )
+        self.description.pack(anchor="w", fill="x", pady=(0, px(root, 10)))
+        card.bind("<Configure>", self._wrap_result_card, add="+")
         self.convert_button = ttk.Button(
             card, text="PDFに変換", style="Primary.TButton",
             command=lambda: self.controller.convert(),
@@ -81,11 +83,6 @@ class PdfTab:
             card, textvariable=self.result, style="Success.TLabel", justify="left", anchor="w",
         )
         self.result_label.pack(fill="x", pady=(px(root, 12), px(root, 6)))
-        card.bind(
-            "<Configure>",
-            lambda e: self.result_label.configure(wraplength=max(100, e.width - px(root, 12))),
-            add="+",
-        )
         actions = ttk.Frame(card, style="Card.TFrame")
         actions.pack(fill="x")
         self.open_button = ttk.Button(
@@ -100,13 +97,21 @@ class PdfTab:
         self.open_folder_button.pack(side="left")
 
     def _card(self, title):
-        item = Card(self.inner)
-        item.pack(fill="x", pady=(0, px(self.root, 14)))
-        ttk.Label(item.content, text=title, style="Section.TLabel").pack(anchor="w", pady=(0, px(self.root, 10)))
+        item = Card(self.inner, padding=16)
+        item.pack(fill="x", pady=(0, px(self.root, 10)))
+        step_heading(item.content, self.root, title)
         return item.content
 
+    def _wrap_result_card(self, event):
+        width = max(100, event.width - px(self.root, 12))
+        for label in (self.description, self.result_label):
+            if int(label.cget("wraplength")) != width:
+                label.configure(wraplength=width)
+
     def _resize(self, event):
-        self.canvas.itemconfigure(self.window, width=max(1, event.width))
+        width = max(1, event.width)
+        if self.canvas.itemcget(self.window, "width") != str(width):
+            self.canvas.itemconfigure(self.window, width=width)
         self._schedule_scroll()
 
     def _schedule_scroll(self, event=None):
@@ -177,4 +182,13 @@ class PdfTab:
             lines.extend(f"警告：{path.name} — {reason}" for path, reason in result.warnings)
         lines.append(f"保存先：{result.folder}")
         self.result.set("\n".join(lines))
+        # Standalone formatting tests use a lightweight view without Tk widgets.
+        label = getattr(self, "result_label", None)
+        if label is not None:
+            if result.stopped_reason and not result.saved:
+                label.configure(style="Error.TLabel")
+            elif result.failures or result.warnings or result.stopped_reason:
+                label.configure(style="Warning.TLabel")
+            else:
+                label.configure(style="Success.TLabel")
         self._result_actions()

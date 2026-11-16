@@ -11,7 +11,7 @@ from .controller import Controller
 from .pdf_view import PdfTab
 from .visuals import (
     ACCENT, ACCENT_SOFT, BG, BORDER, MUTED, TEXT, WARNING, WHITE,
-    Card, px, setup,
+    Card, px, setup, step_heading,
 )
 
 
@@ -35,6 +35,7 @@ class TkView:
         self.metric_values = {key: tk.StringVar(value="—") for key in ("characters", "headings", "tables", "list_items")}
         self._settings_columns = None
         self._metric_columns = None
+        self._header_horizontal = None
         self._scroll_pending = None
         self._build()
         self.controller = Controller(self)
@@ -53,19 +54,41 @@ class TkView:
         colors = self.root._word_colors
         margin = px(self.root, 20)
 
-        header = ttk.Frame(self.root, style="Header.TFrame", padding=(margin, px(self.root, 14)))
+        header = ttk.Frame(self.root, style="Header.TFrame", padding=(margin, px(self.root, 12)))
         header.pack(side="top", fill="x")
-        ttk.Label(header, text="書類変換ツール", style="HeaderTitle.TLabel").pack(anchor="w")
-        ttk.Label(header, text="MarkdownからWordを作成・WordをPDFに変換", style="HeaderSub.TLabel").pack(anchor="w")
-        ttk.Label(header, text="ファイルはこのPC内だけで処理します", style="HeaderSub.TLabel").pack(anchor="w", pady=(px(self.root, 3), 0))
+        self._header = header
+        self._header_left = ttk.Frame(header, style="Header.TFrame")
+        self._header_right = ttk.Frame(header, style="Header.TFrame")
+        ttk.Label(
+            self._header_left, text="書類変換ツール", style="HeaderTitle.TLabel",
+        ).pack(anchor="w")
+        self._header_sub = ttk.Label(
+            self._header_right, text="MarkdownからWordを作成・WordをPDFに変換",
+            style="HeaderSub.TLabel",
+        )
+        self._header_sub.pack(anchor="e")
+        self._header_caption = ttk.Label(
+            self._header_right, text="ファイルはこのPC内だけで処理します",
+            style="HeaderCaption.TLabel",
+        )
+        self._header_caption.pack(anchor="e", pady=(px(self.root, 3), 0))
+        header.columnconfigure(0, weight=1)
+        self._header_left.grid(row=0, column=0, sticky="w")
+        self._header_right.grid(row=0, column=1, sticky="e")
+        self._header_horizontal = True
+        header.bind("<Configure>", self._adapt_header, add="+")
         ttk.Frame(self.root, height=px(self.root, 3), style="HeaderRule.TFrame").pack(side="top", fill="x")
 
         ttk.Frame(self.root, height=1, style="FooterRule.TFrame").pack(side="bottom", fill="x")
         footer = ttk.Frame(self.root, style="App.TFrame", padding=(margin, px(self.root, 8)))
         footer.pack(side="bottom", fill="x")
         footer.columnconfigure(1, weight=1)
-        self.progress = ttk.Progressbar(footer, mode="indeterminate", length=px(self.root, 90))
-        self.progress.grid(row=0, column=0, sticky="w", padx=(0, px(self.root, 10)))
+        progress_slot = ttk.Frame(
+            footer, style="App.TFrame", width=px(self.root, 90), height=px(self.root, 20),
+        )
+        progress_slot.grid(row=0, column=0, sticky="w", padx=(0, px(self.root, 10)))
+        progress_slot.grid_propagate(False)
+        self.progress = ttk.Progressbar(progress_slot, mode="indeterminate")
         self.status_label = ttk.Label(footer, textvariable=self.status, style="Muted.TLabel")
         self.status_label.grid(row=0, column=1, sticky="ew")
         self.help_button = ttk.Button(footer, text="使い方", style="App.TButton", command=self._help)
@@ -73,7 +96,11 @@ class TkView:
         self.exit_button = ttk.Button(footer, text="終了", style="App.TButton")
         self.exit_button.grid(row=0, column=3)
 
-        self.notebook = ttk.Notebook(self.root, style="App.TNotebook")
+        notebook_area = ttk.Frame(
+            self.root, style="App.TFrame", padding=(px(self.root, 8), px(self.root, 4), px(self.root, 8), 0),
+        )
+        notebook_area.pack(fill="both", expand=True)
+        self.notebook = ttk.Notebook(notebook_area, style="App.TNotebook")
         self.notebook.pack(fill="both", expand=True)
         body = ttk.Frame(self.notebook, style="App.TFrame")
         self.notebook.add(body, text="Markdown → Word")
@@ -199,10 +226,15 @@ class TkView:
             ("tables", "表"), ("list_items", "箇条書き"),
         ):
             tile = ttk.Frame(self.metrics, style="Metric.TFrame", padding=px(self.root, 10))
+            ttk.Frame(
+                tile, style="MetricAccent.TFrame", width=px(self.root, 19), height=px(self.root, 3),
+            ).pack(anchor="w", pady=(0, px(self.root, 7)))
             title = ttk.Label(tile, text=label, style="MetricTitle.TLabel")
             title.pack(anchor="w")
             self.metric_titles[key] = title
-            ttk.Label(tile, textvariable=self.metric_values[key], style="MetricValue.TLabel").pack(anchor="w")
+            ttk.Label(
+                tile, textvariable=self.metric_values[key], style="MetricValue.TLabel",
+            ).pack(anchor="w", pady=(px(self.root, 3), 0))
             self.metric_tiles.append(tile)
         self.metrics.bind("<Configure>", self._adapt_metrics)
         self.warn_label = tk.Label(
@@ -261,12 +293,38 @@ class TkView:
         return group
 
     def _card(self, heading: str):
-        item = Card(self.inner)
-        item.pack(fill="x", pady=(0, px(self.root, 14)))
-        ttk.Label(
-            item.content, text=heading, style="Section.TLabel",
-        ).pack(anchor="w", pady=(0, px(self.root, 10)))
+        item = Card(self.inner, padding=16)
+        item.pack(fill="x", pady=(0, px(self.root, 10)))
+        step_heading(item.content, self.root, heading)
         return item.content
+
+    def _adapt_header(self, event=None):
+        """Only reflow when the available header width cannot fit both groups."""
+        width = event.width if event is not None else self._header.winfo_width()
+        if width <= 1:
+            return
+        needed = (
+            self._header_left.winfo_reqwidth()
+            + self._header_right.winfo_reqwidth()
+            + px(self.root, 24)
+        )
+        horizontal = width >= needed
+        if horizontal == self._header_horizontal:
+            return
+        self._header_horizontal = horizontal
+        self._header_left.grid_forget()
+        self._header_right.grid_forget()
+        self._header_left.grid(row=0, column=0, sticky="w")
+        if horizontal:
+            self._header_right.grid(row=0, column=1, sticky="e")
+            anchor = "e"
+        else:
+            self._header_right.grid(
+                row=1, column=0, sticky="w", pady=(px(self.root, 4), 0),
+            )
+            anchor = "w"
+        self._header_sub.pack_configure(anchor=anchor)
+        self._header_caption.pack_configure(anchor=anchor)
 
     def _adapt_settings(self, event=None):
         width = self.settings.winfo_width()
@@ -464,9 +522,11 @@ class TkView:
         self.pdf_tab.set_busy(busy)
         if busy:
             self.mark_previous_output()
+            self.progress.place(x=0, rely=0.5, anchor="w", relwidth=1)
             self.progress.start(14)
         else:
             self.progress.stop()
+            self.progress.place_forget()
 
     def mark_previous_output(self):
         if self.controller.last_result_kind == "batch" and self.controller.last_batch_result:
