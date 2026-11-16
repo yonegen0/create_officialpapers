@@ -68,16 +68,12 @@ class PdfTab:
         self.dir_entry.pack(side="left", expand=True, fill="x")
 
         card = self._card("STEP 3  PDFに変換")
-        description = ttk.Label(
+        self.description = ttk.Label(
             card, text="Microsoft Wordを使用して印刷レイアウトをPDF化します。元のWordは変更しません。",
             style="CardMuted.TLabel", justify="left",
         )
-        description.pack(anchor="w", fill="x", pady=(0, px(root, 10)))
-        card.bind(
-            "<Configure>",
-            lambda e: description.configure(wraplength=max(100, e.width - px(root, 12))),
-            add="+",
-        )
+        self.description.pack(anchor="w", fill="x", pady=(0, px(root, 10)))
+        card.bind("<Configure>", self._wrap_result_card, add="+")
         self.convert_button = ttk.Button(
             card, text="PDFに変換", style="Primary.TButton",
             command=lambda: self.controller.convert(),
@@ -87,11 +83,6 @@ class PdfTab:
             card, textvariable=self.result, style="Success.TLabel", justify="left", anchor="w",
         )
         self.result_label.pack(fill="x", pady=(px(root, 12), px(root, 6)))
-        card.bind(
-            "<Configure>",
-            lambda e: self.result_label.configure(wraplength=max(100, e.width - px(root, 12))),
-            add="+",
-        )
         actions = ttk.Frame(card, style="Card.TFrame")
         actions.pack(fill="x")
         self.open_button = ttk.Button(
@@ -110,6 +101,12 @@ class PdfTab:
         item.pack(fill="x", pady=(0, px(self.root, 10)))
         step_heading(item.content, self.root, title)
         return item.content
+
+    def _wrap_result_card(self, event):
+        width = max(100, event.width - px(self.root, 12))
+        for label in (self.description, self.result_label):
+            if int(label.cget("wraplength")) != width:
+                label.configure(wraplength=width)
 
     def _resize(self, event):
         width = max(1, event.width)
