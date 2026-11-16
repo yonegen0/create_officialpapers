@@ -5,7 +5,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 
-from .visuals import Card, px
+from .visuals import Card, px, step_heading
 
 
 class PdfTab:
@@ -68,10 +68,16 @@ class PdfTab:
         self.dir_entry.pack(side="left", expand=True, fill="x")
 
         card = self._card("STEP 3  PDFに変換")
-        ttk.Label(
+        description = ttk.Label(
             card, text="Microsoft Wordを使用して印刷レイアウトをPDF化します。元のWordは変更しません。",
-            style="CardMuted.TLabel", wraplength=700,
-        ).pack(anchor="w", pady=(0, px(root, 10)))
+            style="CardMuted.TLabel", justify="left",
+        )
+        description.pack(anchor="w", fill="x", pady=(0, px(root, 10)))
+        card.bind(
+            "<Configure>",
+            lambda e: description.configure(wraplength=max(100, e.width - px(root, 12))),
+            add="+",
+        )
         self.convert_button = ttk.Button(
             card, text="PDFに変換", style="Primary.TButton",
             command=lambda: self.controller.convert(),
@@ -100,13 +106,15 @@ class PdfTab:
         self.open_folder_button.pack(side="left")
 
     def _card(self, title):
-        item = Card(self.inner)
-        item.pack(fill="x", pady=(0, px(self.root, 14)))
-        ttk.Label(item.content, text=title, style="Section.TLabel").pack(anchor="w", pady=(0, px(self.root, 10)))
+        item = Card(self.inner, padding=16)
+        item.pack(fill="x", pady=(0, px(self.root, 10)))
+        step_heading(item.content, self.root, title)
         return item.content
 
     def _resize(self, event):
-        self.canvas.itemconfigure(self.window, width=max(1, event.width))
+        width = max(1, event.width)
+        if self.canvas.itemcget(self.window, "width") != str(width):
+            self.canvas.itemconfigure(self.window, width=width)
         self._schedule_scroll()
 
     def _schedule_scroll(self, event=None):
@@ -177,4 +185,10 @@ class PdfTab:
             lines.extend(f"警告：{path.name} — {reason}" for path, reason in result.warnings)
         lines.append(f"保存先：{result.folder}")
         self.result.set("\n".join(lines))
+        if result.stopped_reason and not result.saved:
+            self.result_label.configure(style="Error.TLabel")
+        elif result.failures or result.warnings or result.stopped_reason:
+            self.result_label.configure(style="Warning.TLabel")
+        else:
+            self.result_label.configure(style="Success.TLabel")
         self._result_actions()
