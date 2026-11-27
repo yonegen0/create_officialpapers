@@ -282,24 +282,18 @@ def _normalize_resume_intro(blocks: list[Block]) -> list[Block]:
     return normalized
 
 
-def parse_markdown(source: str, style: str = "職務経歴書") -> ParsedDocument:
-    if style not in ("職務経歴書", "標準文書"):
-        raise ConversionError("文書スタイルを選択してください。")
+def parse_markdown(source: str) -> ParsedDocument:
     if not source or not source.strip():
         raise ConversionError("Markdownが空です。入力してください。")
     source = source.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
-    reserved: dict[str, Block] = {}
-    preprocessed = source
-    if style == "職務経歴書":
-        preprocessed, reserved = _reserved_resume_tables(source)
+    preprocessed, reserved = _reserved_resume_tables(source)
     md = MarkdownIt("commonmark", {"html": False}).enable("table")
     tokens = md.parse(preprocessed)
     blocks: list[Block] = []
     warnings: list[str] = []
-    if style == "職務経歴書":
-        leftover = [_separated(line) for line in preprocessed.splitlines()]
-        if any(item and (item[0] in _KV_KEYS or item in _HEADER_KEYS) for item in leftover):
-            warnings.append("一部の2列データを表と判定できませんでした。原文のまま保持します。")
+    leftover = [_separated(line) for line in preprocessed.splitlines()]
+    if any(item and (item[0] in _KV_KEYS or item in _HEADER_KEYS) for item in leftover):
+        warnings.append("一部の2列データを表と判定できませんでした。原文のまま保持します。")
     list_stack: list[tuple[bool, int, int]] = []
     next_list_id = 0
     in_work_history = False
@@ -323,7 +317,7 @@ def parse_markdown(source: str, style: str = "職務経歴書") -> ParsedDocumen
             inline = tokens[i + 1] if i + 1 < len(tokens) else None
             spans = _inline(inline.children if inline and inline.type == "inline" else None)
             text = _plain(spans).strip()
-            if style == "職務経歴書" and not list_stack and (
+            if not list_stack and (
                 _SECTION.match(text) or (typ == "heading_open" and int(tok.tag[1:]) == 1)
             ):
                 in_work_history = bool(re.fullmatch(r"(?:■\s*)?職務経歴", text))
@@ -335,20 +329,20 @@ def parse_markdown(source: str, style: str = "職務経歴書") -> ParsedDocumen
                                     ordered=ordered, start=start, list_id=list_id))
             elif typ == "heading_open":
                 level = min(int(tok.tag[1:]), 3)
-                if style == "職務経歴書" and text == "職務経歴書" and not blocks:
+                if text == "職務経歴書" and not blocks:
                     blocks.append(Block("meta_title", spans))
                     i += 3
                     continue
-                if style == "職務経歴書" and _SECTION.match(text):
+                if _SECTION.match(text):
                     level = 1
                 blocks.append(Block("heading", spans, level=level))
-            elif style == "職務経歴書" and _SECTION.match(text) and "\n" not in text:
+            elif _SECTION.match(text) and "\n" not in text:
                 blocks.append(Block("heading", spans, level=1))
-            elif style == "職務経歴書" and (_CIRCLED.match(text) or _BRACKET.match(text)) and "\n" not in text:
+            elif (_CIRCLED.match(text) or _BRACKET.match(text)) and "\n" not in text:
                 blocks.append(Block("heading", spans, level=2))
-            elif style == "職務経歴書" and in_work_history and _ROLE_PERIOD.fullmatch(text) and "\n" not in text:
+            elif in_work_history and _ROLE_PERIOD.fullmatch(text) and "\n" not in text:
                 blocks.append(Block("heading", spans, level=2))
-            elif style == "職務経歴書" and text == "職務経歴書" and not blocks:
+            elif text == "職務経歴書" and not blocks:
                 blocks.append(Block("meta_title", spans))
             else:
                 blocks.append(Block("paragraph", spans))
@@ -375,7 +369,7 @@ def parse_markdown(source: str, style: str = "職務経歴書") -> ParsedDocumen
                         current_row.append(_inline(inl.children if inl and inl.type == "inline" else None))
                 i += 1
             table_type = "standard"
-            if style == "職務経歴書" and rows and len(rows[0]) == 2:
+            if rows and len(rows[0]) == 2:
                 labels = tuple("".join(s.text for s in cell).strip() for cell in rows[0])
                 if labels == ("経験・能力", "内容"):
                     table_type = "skill"
@@ -392,16 +386,15 @@ def parse_markdown(source: str, style: str = "職務経歴書") -> ParsedDocumen
             warnings.append("HTMLは実行せず、文字列として出力します。")
             blocks.append(Block("code", (Span(tok.content),)))
         i += 1
-    if style == "職務経歴書":
-        # Normalize metadata without changing the source or the original counters.
-        characters_before_normalization = sum(len(s.text) for b in blocks for s in b.spans)
-        characters_before_normalization += sum(
-            len(s.text) for b in blocks for row in b.rows for cell in row for s in cell
-        )
-        blocks = _normalize_resume_intro(blocks)
+    # Normalize metadata without changing the source or the original counters.
+    characters_before_normalization = sum(len(s.text) for b in blocks for s in b.spans)
+    characters_before_normalization += sum(
+        len(s.text) for b in blocks for row in b.rows for cell in row for s in cell
+    )
+    blocks = _normalize_resume_intro(blocks)
     if not blocks:
         raise ConversionError("変換できる本文がありません。")
-    if style == "職務経歴書" and blocks[-1].kind == "paragraph" and _plain(blocks[-1].spans).strip() == "以上":
+    if blocks[-1].kind == "paragraph" and _plain(blocks[-1].spans).strip() == "以上":
         blocks[-1] = Block("meta_end", blocks[-1].spans)
     # Reserved table rows are replaced by sentinels, so inspect original
     # Markdown tokens to detect images inside converted tab-separated cells.
@@ -409,11 +402,7 @@ def parse_markdown(source: str, style: str = "職務経歴書") -> ParsedDocumen
     if any(child.type == "image" for token in image_tokens for child in (token.children or [])):
         warnings.append("画像は埋め込まず、Markdown記法の文字列として保持します。")
     # The public counter tracks visible content characters; never count markup.
-    if style == "職務経歴書":
-        char_count = characters_before_normalization
-    else:
-        char_count = sum(len(s.text) for b in blocks for s in b.spans)
-        char_count += sum(len(s.text) for b in blocks for row in b.rows for cell in row for s in cell)
+    char_count = characters_before_normalization
     for b in blocks:
         if b.kind == "table" and any(len(row) != len(b.rows[0]) for row in b.rows):
             warnings.append("列数が異なる表があります。")
@@ -425,5 +414,4 @@ def parse_markdown(source: str, style: str = "職務経歴書") -> ParsedDocumen
         headings=sum(b.kind in ("heading", "meta_title") for b in blocks),
         tables=sum(b.kind == "table" for b in blocks),
         list_items=sum(b.kind == "list" for b in blocks),
-        style=style,
     )

@@ -72,7 +72,7 @@ class Controller:
 
     def _prepare(self) -> tuple[Preview, str]:
         content = self.source()
-        result = prepare(content, self.view.style.get(), self.view.input_mode.get())
+        result = prepare(content, self.view.input_mode.get())
         return result, content
 
     def _error(self, exc: BaseException) -> None:
@@ -135,10 +135,9 @@ class Controller:
             self.preview = None
             self.batch_previews = None
             paths = self.selected_files
-            style = self.view.style.get()
             self.view.clear_preview()
             self.submit_job(
-                lambda: prepare_batch(paths, style, self._progress("事前確認")),
+                lambda: prepare_batch(paths, self._progress("事前確認")),
                 self._finish_batch_preview,
                 f"{len(paths)}件のMarkdownを確認しています…",
             )
@@ -198,16 +197,15 @@ class Controller:
                 else:
                     replace = True
             from ..service import _digest
-            if self.preview.fingerprint != _digest(content, self.view.style.get(), self.view.input_mode.get()):
+            if self.preview.fingerprint != _digest(content, self.view.input_mode.get()):
                 raise ConversionError("入力が変わりました。事前確認をやり直してください。")
             preview = self.preview
         except (OSError, ConversionError) as exc:
             self._error(exc)
             return
-        style = self.view.style.get()
         mode = self.view.input_mode.get()
         self.submit_job(
-            lambda: convert(preview, content, style, mode, path, replace=replace),
+            lambda: convert(preview, content, mode, path, replace=replace),
             self._finish,
             "Wordを生成しています…",
         )
@@ -217,20 +215,17 @@ class Controller:
         if items is None:
             dialogs.info("事前確認", "先に「事前確認」を実行してください。", self.view.root)
             return
-        if tuple(item.path for item in items) != self.selected_files or any(
-            item.preview is not None and item.preview.style != self.view.style.get() for item in items
-        ):
+        if tuple(item.path for item in items) != self.selected_files:
             self.invalidate()
-            dialogs.info("事前確認", "入力またはスタイルが変わりました。事前確認をやり直してください。", self.view.root)
+            dialogs.info("事前確認", "入力が変わりました。事前確認をやり直してください。", self.view.root)
             return
         folder_text = self.view.output_dir.get().strip()
         folder = Path(folder_text) if folder_text else Path("__missing_output_directory__")
         if not folder.is_dir():
             self._error(ConversionError("保存先フォルダーが存在しません。"))
             return
-        style = self.view.style.get()
         self.submit_job(
-            lambda: convert_batch(items, style, folder, self._progress("生成")),
+            lambda: convert_batch(items, folder, self._progress("生成")),
             self._finish_batch,
             f"{len(items)}件のWordを生成しています…",
         )

@@ -5,9 +5,9 @@ def plain(block):
     return "".join(x.text for x in block.spans)
 
 
-def test_standard_markdown_structure():
+def test_generic_markdown_structure():
     data = "# タイトル\n\n通常 **太字** と *斜体* [サイト](https://example.com)\n\n- 一つ\n- 二つ\n\n1. 順番\n\n| 項目 | 内容 |\n|---|---|\n| A | B |\n\n---"
-    d = parse_markdown(data, "標準文書")
+    d = parse_markdown(data)
     assert d.headings == 1 and d.tables == 1 and d.list_items == 3
     para = next(x for x in d.blocks if x.kind == "paragraph")
     assert any(s.bold and s.text == "太字" for s in para.spans)
@@ -56,7 +56,7 @@ def test_tabs_and_skill_table():
 
 
 def test_generic_tabs_and_non_table_text():
-    d = parse_markdown("受付\t予約調整\n営業\t調整", "職務経歴書")
+    d = parse_markdown("受付\t予約調整\n営業\t調整")
     assert d.tables == 1 and len(d.blocks[0].rows) == 2
     assert d.blocks[0].rows[0][0][0].text == "受付"
     bad = parse_markdown("単独\t行\n\n文章\n\n- 箇条\t項目\n- 箇条\t項目\n\n> 引用\t値\n> 引用\t値\n\n```\nA\tB\nC\tD\n```")
@@ -65,13 +65,11 @@ def test_generic_tabs_and_non_table_text():
     assert parse_markdown("A  B\nC  D").tables == 0
 
 
-def test_style_separation_and_metadata_scope():
+def test_resume_metadata_scope():
     src = "職務経歴書\n\n氏名：架空 太郎\n\n本文です。\n\n氏名：再掲"
     d = parse_markdown(src)
     assert d.blocks[-1].kind == "paragraph"
-    standard = parse_markdown(src, "標準文書")
-    assert all(x.kind not in ("meta_title", "meta_name") for x in standard.blocks)
-    assert d.style == "職務経歴書" and standard.style == "標準文書"
+    assert [x.kind for x in d.blocks[:2]] == ["meta_title", "meta_name"]
 
 
 def test_code_and_html_remain_literal():
@@ -125,7 +123,7 @@ def test_images_and_resume_ending_and_role_period():
     assert d.blocks[-1].kind == "meta_end"
     assert any("画像" in w for w in d.warnings)
     assert parse_markdown("以上\n\n説明").blocks[0].kind == "paragraph"
-    assert parse_markdown("以上", "標準文書").blocks[0].kind == "paragraph"
+    assert parse_markdown("以上").blocks[0].kind == "meta_end"
 
 
 def test_partially_recognized_company_rows_become_generic_table():
@@ -139,7 +137,6 @@ def test_partially_recognized_company_rows_become_generic_table():
     assert len(headed.blocks[0].rows) == 3
     company = parse_markdown("勤務先\t架空会社\n在籍期間\t2023年～現在")
     assert company.blocks[0].table_type == "company"
-    assert parse_markdown(source, "標準文書").tables == 0
 
 
 def test_tabular_image_reference_is_preserved_and_warned():
@@ -186,8 +183,6 @@ def test_resume_intro_title_after_date_and_body_date_scope():
     assert parsed.blocks[-1].kind == "table"
     assert parsed.blocks[-1].rows[1][0][0].text == "2022年9月現在"
     assert all(b.kind not in ("meta_date", "meta_name", "meta_title") for b in parsed.blocks[3:])
-    standard = parse_markdown("2026年10月現在\n\n氏名：架空 花子", "標準文書")
-    assert [b.kind for b in standard.blocks] == ["paragraph", "paragraph"]
 
 
 def test_resume_intro_does_not_cross_ordinary_prose():

@@ -24,8 +24,7 @@ class TkView:
         self.file_count = tk.StringVar(value="")
         self._batch_mode = False
         self._single_output_name = ""
-        self.style = tk.StringVar(value="職務経歴書")
-        self.output_name = tk.StringVar(value=f"文書_{datetime.now():%Y%m%d}.docx")
+        self.output_name = tk.StringVar(value=f"職務経歴書_{datetime.now():%Y%m%d}.docx")
         home = Path.home()
         self.output_dir = tk.StringVar(value=str(home / "Documents" if (home / "Documents").is_dir() else home))
         self.status = tk.StringVar(value="Markdownを入力して事前確認してください")
@@ -39,7 +38,7 @@ class TkView:
         self._scroll_pending = None
         self._build()
         self.controller = Controller(self)
-        for var in (self.file_path, self.style, self.input_mode):
+        for var in (self.file_path, self.input_mode):
             var.trace_add("write", self.controller.invalidate)
         self.input_mode.trace_add("write", self._show_mode)
         self.input_text.bind("<<Modified>>", self._on_text_changed)
@@ -63,7 +62,7 @@ class TkView:
             self._header_left, text="書類変換ツール", style="HeaderTitle.TLabel",
         ).pack(anchor="w")
         self._header_sub = ttk.Label(
-            self._header_right, text="MarkdownからWordを作成・WordをPDFに変換",
+            self._header_right, text="職務経歴書のWord生成・WordのPDF変換",
             style="HeaderSub.TLabel",
         )
         self._header_sub.pack(anchor="e")
@@ -125,7 +124,7 @@ class TkView:
 
         card = self._card("STEP 1  Markdownを入力")
         ttk.Label(
-            card, text="Markdownファイルを選ぶか、文章を直接貼り付けます。",
+            card, text="職務経歴書のMarkdownファイルを選ぶか、直接貼り付けます。",
             style="CardMuted.TLabel",
         ).pack(anchor="w", pady=(0, px(self.root, 10)))
         selector = ttk.Frame(card, style="Card.TFrame")
@@ -189,13 +188,6 @@ class TkView:
         self.settings = ttk.Frame(card, style="Card.TFrame")
         self.settings.pack(fill="x")
         self.setting_groups = []
-        style_group = self._setting_group("文書スタイル")
-        self.style_combo = ttk.Combobox(
-            style_group, textvariable=self.style,
-            values=("職務経歴書", "標準文書"), state="readonly",
-            style="Card.TCombobox",
-        )
-        self.style_combo.pack(fill="x")
         name_group = self._setting_group("出力ファイル名")
         self.name_entry = ttk.Entry(
             name_group, textvariable=self.output_name, style="App.TEntry",
@@ -211,6 +203,8 @@ class TkView:
         )
         self.dir_entry.pack(side="left", fill="x", expand=True)
         self.settings.bind("<Configure>", self._adapt_settings)
+        ttk.Label(card, text="職務経歴書形式でWordファイルを生成します。",
+                  style="CardMuted.TLabel").pack(anchor="w", pady=(px(self.root, 8), 0))
 
         card = self._card("STEP 3  事前確認・Word生成")
         ttk.Label(
@@ -330,21 +324,21 @@ class TkView:
         width = self.settings.winfo_width()
         if width <= 1:
             return
-        columns = 3 if width >= px(self.root, 720) else 1
+        columns = 2 if width >= px(self.root, 720) else 1
         if columns == self._settings_columns:
             return
         self._settings_columns = columns
         for group in self.setting_groups:
             group.grid_forget()
-        for column in range(3):
-            self.settings.columnconfigure(column, weight=1 if columns == 3 else (1 if column == 0 else 0))
+        for column in range(2):
+            self.settings.columnconfigure(column, weight=(2, 3)[column] if columns == 2 else (1 if column == 0 else 0))
         for index, group in enumerate(self.setting_groups):
             group.grid(
-                row=0 if columns == 3 else index,
-                column=index if columns == 3 else 0,
+                row=0 if columns == 2 else index,
+                column=index if columns == 2 else 0,
                 sticky="ew",
-                padx=(0, px(self.root, 10)) if columns == 3 and index < 2 else 0,
-                pady=(0, px(self.root, 9)) if columns == 1 and index < 2 else 0,
+                padx=(0, px(self.root, 10)) if columns == 2 and index < 1 else 0,
+                pady=(0, px(self.root, 9)) if columns == 1 and index < 1 else 0,
             )
 
     def _adapt_metrics(self, event=None):
@@ -451,7 +445,7 @@ class TkView:
         dialogs.info(
             "使い方",
             "① Markdownファイルを選ぶか文章を貼り付ける\n"
-            "② 文書スタイル、出力ファイル名、保存先を設定する\n"
+            "② 出力ファイル名、保存先を設定する\n"
             "③ 事前確認を実行し、Wordを生成する\n\n"
             "複数選択時は各ファイルを個別のWordへ生成し、同名なら自動連番します。\n"
             "単体生成では置換・別名保存・キャンセルを選べます。\n\n"
@@ -509,7 +503,6 @@ class TkView:
             self.name_entry, self.dir_entry, *self.mode_widgets,
         ):
             widget.configure(state="disabled" if busy else "normal")
-        self.style_combo.configure(state="disabled" if busy else "readonly")
         self.input_text.configure(state="disabled" if busy else "normal")
         if not busy:
             self.name_entry.configure(state="disabled" if self._batch_mode else "normal")

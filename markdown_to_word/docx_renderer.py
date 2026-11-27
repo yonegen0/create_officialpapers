@@ -3,34 +3,14 @@ from __future__ import annotations
 
 from docx import Document
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Mm, Pt, RGBColor
+from docx.shared import Mm, Pt
 from docx.opc.constants import RELATIONSHIP_TYPE as RT
-from docx.enum.style import WD_STYLE_TYPE
 
 from .models import Block, ParsedDocument, Span
 
 _FONT = "游ゴシック"
-
-
-def _font(font, size: float, bold: bool | None = None) -> None:
-    font.name = _FONT
-    font.size = Pt(size)
-    if bold is not None:
-        font.bold = bold
-    font.color.rgb = RGBColor(39, 48, 57)
-
-
-def _east_asian(style) -> None:
-    rpr = style.element.get_or_add_rPr()
-    rfonts = rpr.find(qn("w:rFonts"))
-    if rfonts is None:
-        rfonts = OxmlElement("w:rFonts")
-        rpr.insert(0, rfonts)
-    for key in ("ascii", "hAnsi", "eastAsia", "cs"):
-        rfonts.set(qn("w:" + key), _FONT)
 
 
 def _run_east_asian(run) -> None:
@@ -40,52 +20,6 @@ def _run_east_asian(run) -> None:
         fonts = OxmlElement("w:rFonts")
         rpr.insert(0, fonts)
     fonts.set(qn("w:eastAsia"), _FONT)
-
-
-def _style(doc, name: str, size: float, before: float, after: float, *, bold: bool = False, keep: bool = False) -> None:
-    styles = doc.styles
-    s = styles[name] if name in styles else styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
-    _font(s.font, size, bold)
-    _east_asian(s)
-    f = s.paragraph_format
-    f.space_before, f.space_after = Pt(before), Pt(after)
-    f.line_spacing = 1.15
-    f.keep_with_next = keep
-    f.widow_control = True
-
-
-def _setup(doc: Document) -> None:
-    section = doc.sections[0]
-    section.page_width, section.page_height = Mm(210), Mm(297)
-    section.top_margin = section.bottom_margin = Mm(16)
-    section.left_margin = section.right_margin = Mm(18)
-    section.footer_distance = Mm(8)
-    _style(doc, "Normal", 10.5, 0, 4)
-    _style(doc, "Title", 20, 0, 10, bold=True, keep=True)
-    title_ppr = doc.styles["Title"].element.get_or_add_pPr()
-    old_border = title_ppr.find(qn("w:pBdr"))
-    if old_border is not None:
-        title_ppr.remove(old_border)
-    _style(doc, "Heading 1", 13, 10, 5, bold=True, keep=True)
-    _style(doc, "Heading 2", 11.5, 8, 3, bold=True, keep=True)
-    _style(doc, "Heading 3", 10.5, 6, 3, bold=True, keep=True)
-    for name in ("List Bullet", "List Number", "List Bullet 2", "List Number 2", "List Bullet 3", "List Number 3"):
-        if name in doc.styles:
-            _style(doc, name, 10.5, 0, 2)
-    footer = section.footer.paragraphs[0]
-    footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    footer.style = doc.styles["Normal"]
-    run = footer.add_run()
-    fld = OxmlElement("w:fldChar")
-    fld.set(qn("w:fldCharType"), "begin")
-    run._r.append(fld)
-    instr = OxmlElement("w:instrText")
-    instr.set(qn("xml:space"), "preserve")
-    instr.text = " PAGE "
-    footer.add_run()._r.append(instr)
-    end = OxmlElement("w:fldChar")
-    end.set(qn("w:fldCharType"), "end")
-    footer.add_run()._r.append(end)
 
 
 def _hyperlink(p, text: str, url: str, *, bold: bool, italic: bool) -> None:
@@ -260,47 +194,6 @@ def _ordered_numbering(doc, style_name: str, start: int) -> int:
 
 
 def render_docx(parsed: ParsedDocument) -> Document:
-    if parsed.style == "職務経歴書":
-        from .resume_template import render_resume
-        return render_resume(parsed)
-    doc = Document()
-    _setup(doc)
-    list_numbers: dict[int, int] = {}
-    for b in parsed.blocks:
-        if b.kind == "table":
-            _draw_table(doc, b)
-            continue
-        if b.kind == "heading":
-            p = doc.add_paragraph(style=f"Heading {min(b.level, 3)}")
-        elif b.kind == "meta_title":
-            p = doc.add_paragraph(style="Title")
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        elif b.kind in ("meta_date", "meta_name"):
-            p = doc.add_paragraph()
-            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-            p.paragraph_format.space_after = Pt(2)
-        elif b.kind == "list":
-            n = max(1, min(b.level, 3))
-            name = "List Number" if b.ordered else "List Bullet"
-            if n > 1:
-                name += f" {n}"
-            p = doc.add_paragraph(style=name)
-            if b.ordered:
-                if b.list_id not in list_numbers:
-                    list_numbers[b.list_id] = _ordered_numbering(doc, name, b.start)
-                num_pr = p._p.get_or_add_pPr().get_or_add_numPr()
-                num_pr.get_or_add_ilvl().val = 0
-                num_pr.get_or_add_numId().val = list_numbers[b.list_id]
-        else:
-            p = doc.add_paragraph()
-        if b.kind == "meta_end":
-            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        if b.kind == "rule":
-            _rule(p)
-        else:
-            _spans(p, b.spans)
-        if b.kind == "code":
-            for run in p.runs:
-                run.font.name = "Consolas"
-    # Explicitly keep the Word file editable; no document protection is added.
-    return doc
+    from .resume_template import render_resume
+
+    return render_resume(parsed)

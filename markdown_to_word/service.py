@@ -23,18 +23,18 @@ def read_file(path: Path) -> str:
         raise ConversionError(f"ファイルを読み取れませんでした: {exc}") from exc
 
 
-def _digest(source: str, style: str, mode: str) -> str:
-    return hashlib.sha256((style + "\x00" + mode + "\x00" + source).encode("utf-8")).hexdigest()
+def _digest(source: str, mode: str) -> str:
+    return hashlib.sha256((mode + "\x00" + source).encode("utf-8")).hexdigest()
 
 
-def prepare(source: str, style: str, mode: str) -> Preview:
+def prepare(source: str, mode: str) -> Preview:
     if mode not in ("file", "paste"):
         raise ConversionError("入力方式が正しくありません。")
-    parsed = parse_markdown(source, style)
-    return Preview(parsed, _digest(source, style, mode), style, mode)
+    parsed = parse_markdown(source)
+    return Preview(parsed, _digest(source, mode), mode)
 
 
-def convert(preview: Preview, source: str, style: str, mode: str, target: Path, *, replace: bool) -> Path:
-    if preview.fingerprint != _digest(source, style, mode):
+def convert(preview: Preview, source: str, mode: str, target: Path, *, replace: bool) -> Path:
+    if preview.fingerprint != _digest(source, mode):
         raise InputChangedError("事前確認後にMarkdownまたは設定が変更されました。事前確認をやり直してください。")
     return save_document(preview.document, target, replace=replace)

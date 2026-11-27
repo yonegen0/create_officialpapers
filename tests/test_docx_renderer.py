@@ -97,22 +97,15 @@ def test_resume_template_absence_is_explicit(tmp_path, monkeypatch):
         render_docx(parse_markdown("職務経歴書\n\n■ 職務要約\n\n説明"))
 
 
-def test_standard_body_remains_existing_renderer():
-    doc = render_docx(parse_markdown("# 見出し\n\n" + "業務内容です。" * 1000, "標準文書"))
-    assert doc.paragraphs[1].paragraph_format.page_break_before is None
-    assert not doc.paragraphs[1].paragraph_format.keep_together
-    assert doc.styles["Normal"].element.get_or_add_rPr().find(qn("w:rFonts")).get(qn("w:eastAsia")) == "游ゴシック"
-    assert "PAGE" in doc.sections[0].footer._element.xml
-
-
 def test_hyperlinks_remain_clickable():
-    doc = render_docx(parse_markdown("[会社サイト](https://example.com)", "標準文書"))
-    assert "w:hyperlink" in doc.paragraphs[0]._p.xml
+    doc = render_docx(parse_markdown("[会社サイト](https://example.com)"))
+    assert any("w:hyperlink" in p._p.xml for p in doc.paragraphs)
+    assert any(rel.target_ref == "https://example.com" for rel in doc.part.rels.values())
 
 
 def test_numbering_start_and_independence():
     src = "3. 一つ\n4. 二つ\n\n通常の文章\n\n1. 別リスト\n2. 別の項目"
-    parsed = parse_markdown(src, "標準文書")
+    parsed = parse_markdown(src)
     lists = [x for x in parsed.blocks if x.kind == "list"]
     assert [x.start for x in lists] == [3, 3, 1, 1]
     assert lists[0].list_id == lists[1].list_id != lists[2].list_id
@@ -668,9 +661,8 @@ def test_resume_creation_date_added_when_missing_title_or_name(sample_template, 
     assert doc.paragraphs[0].alignment == WD_ALIGN_PARAGRAPH.RIGHT
 
 
-def test_standard_document_keeps_date_and_does_not_insert(sample_template, monkeypatch):
-    from datetime import date
-
-    monkeypatch.setattr(resume, "_local_today", lambda: date(2026, 11, 14))
-    doc = render_docx(parse_markdown("2026年10月現在\n\n本文です。", "標準文書"))
-    assert [p.text for p in doc.paragraphs] == ["2026年10月現在", "本文です。"]
+def test_generic_table_and_rule_use_shared_renderer():
+    doc = render_docx(parse_markdown("| A | B |\n|---|---|\n| x | [site](https://example.com) |\n\n---"))
+    assert doc.tables[0].cell(1, 0).text == "x"
+    assert "w:hyperlink" in doc.tables[0].cell(1, 1)._tc.xml
+    assert any("w:pBdr" in p._p.xml for p in doc.paragraphs)

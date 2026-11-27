@@ -13,29 +13,29 @@ def test_file_encoding_and_changed_input(tmp_path):
     p.write_bytes(b"\xef\xbb\xbf# \xe8\xa6\x8b\xe5\x87\xba\xe3\x81\x97\r\n")
     source = read_file(p)
     assert "見出し" in source
-    plan = prepare(source, "標準文書", "file")
+    plan = prepare(source, "file")
     with pytest.raises(InputChangedError):
-        convert(plan, source + "追加", "標準文書", "file", tmp_path / "word.docx", replace=False)
+        convert(plan, source + "追加", "file", tmp_path / "word.docx", replace=False)
     assert not (tmp_path / "word.docx").exists()
 
 
 def test_success_no_overwrite_and_rename(tmp_path):
-    p = prepare("# 見出し\n\n文章", "標準文書", "paste")
+    p = prepare("# 見出し\n\n文章", "paste")
     out = tmp_path / "架空.docx"
-    convert(p, "# 見出し\n\n文章", "標準文書", "paste", out, replace=False)
-    assert Document(out).paragraphs[1].text == "文章"
+    convert(p, "# 見出し\n\n文章", "paste", out, replace=False)
+    assert "文章" in [p.text for p in Document(out).paragraphs]
     before = out.read_bytes()
     with pytest.raises(FileExistsError):
-        convert(p, "# 見出し\n\n文章", "標準文書", "paste", out, replace=False)
+        convert(p, "# 見出し\n\n文章", "paste", out, replace=False)
     assert out.read_bytes() == before
     next_path = numbered_path(out)
-    convert(p, "# 見出し\n\n文章", "標準文書", "paste", next_path, replace=False)
+    convert(p, "# 見出し\n\n文章", "paste", next_path, replace=False)
     assert next_path.name == "架空 (1).docx"
 
 
 def test_replacement_failure_protects_original(tmp_path, monkeypatch):
     import markdown_to_word.output as output
-    p = prepare("変更後", "標準文書", "paste")
+    p = prepare("変更後", "paste")
     path = tmp_path / "保存.docx"
     path.write_bytes(b"old-content")
     old = path.read_bytes()
@@ -45,22 +45,22 @@ def test_replacement_failure_protects_original(tmp_path, monkeypatch):
 
     monkeypatch.setattr(output.os, "replace", fail_replace)
     with pytest.raises(ConversionError):
-        convert(p, "変更後", "標準文書", "paste", path, replace=True)
+        convert(p, "変更後", "paste", path, replace=True)
     assert path.read_bytes() == old
     assert not list(tmp_path.glob(".mtw-*"))
 
 
 def test_replace_success(tmp_path):
-    p = prepare("更新済み", "標準文書", "paste")
+    p = prepare("更新済み", "paste")
     path = tmp_path / "word.docx"
     path.write_bytes(b"old")
-    convert(p, "更新済み", "標準文書", "paste", path, replace=True)
-    assert Document(path).paragraphs[0].text == "更新済み"
+    convert(p, "更新済み", "paste", path, replace=True)
+    assert "更新済み" in [p.text for p in Document(path).paragraphs]
 
 
 def test_empty_input_and_invalid_encoding(tmp_path):
     with pytest.raises(ConversionError):
-        prepare(" \n ", "職務経歴書", "paste")
+        prepare(" \n ", "paste")
     p = tmp_path / "input.md"
     p.write_bytes(b"\xff\xfe\xff")
     with pytest.raises(ConversionError):
@@ -75,16 +75,16 @@ def test_batch_four_files_and_same_stem_numbering(tmp_path):
     existing = tmp_path / "企業A.docx"
     existing.write_bytes(b"untouched")
 
-    items = prepare_batch(tuple(files), "標準文書")
+    items = prepare_batch(tuple(files))
     assert len(items) == 4
-    result = convert_batch(items, "標準文書", tmp_path)
+    result = convert_batch(items, tmp_path)
     assert len(result.saved) == 4
     assert not result.failures
     assert [p.name for p in result.saved] == [
         "企業A (1).docx", "企業A (2).docx", "企業B.docx", "企業C.docx"
     ]
     assert existing.read_bytes() == b"untouched"
-    assert all(Document(path).paragraphs[0].text == "見出し" for path in result.saved)
+    assert all("見出し" in [p.text for p in Document(path).paragraphs] for path in result.saved)
 
 
 def test_batch_continues_after_invalid_and_changed_input(tmp_path):
@@ -94,10 +94,10 @@ def test_batch_continues_after_invalid_and_changed_input(tmp_path):
     for path in (first, changed, last):
         path.write_text("# 見出し", encoding="utf-8")
     bad.write_bytes(b"\xff\xfe\xff")
-    items = prepare_batch((first, bad, changed, last), "標準文書")
+    items = prepare_batch((first, bad, changed, last))
     assert sum(item.error is not None for item in items) == 1
     changed.write_text("# 更新後", encoding="utf-8")
-    result = convert_batch(items, "標準文書", tmp_path)
+    result = convert_batch(items, tmp_path)
     assert len(result.saved) == 2
     assert len(result.failures) == 2
     assert "変更.md" in [path.name for path, _ in result.failures]
@@ -111,10 +111,10 @@ def test_batch_template_missing_stops_without_writing(tmp_path, monkeypatch):
     from markdown_to_word import resume_template
     path = tmp_path / "入力.md"
     path.write_text("# 職務経歴書", encoding="utf-8")
-    items = prepare_batch((path,), "職務経歴書")
+    items = prepare_batch((path,))
     monkeypatch.setattr(resume_template, "_TEMPLATE_PATH", tmp_path / "not-exist.docx")
     with pytest.raises(ConversionError, match="テンプレート"):
-        convert_batch(items, "職務経歴書", tmp_path)
+        convert_batch(items, tmp_path)
     assert not list(tmp_path.glob("*.docx"))
 
 
@@ -122,19 +122,19 @@ def test_batch_save_race_retries_numbered_path(tmp_path, monkeypatch):
     import markdown_to_word.batch as batch
     path = tmp_path / "競合.md"
     path.write_text("# 見出し", encoding="utf-8")
-    items = batch.prepare_batch((path,), "標準文書")
+    items = batch.prepare_batch((path,))
     original = batch.convert
     calls = []
 
     def collide(*args, **kwargs):
-        target = args[4]
+        target = args[3]
         calls.append(target)
         if len(calls) == 1:
             target.write_bytes(b"other-writer")
         return original(*args, **kwargs)
 
     monkeypatch.setattr(batch, "convert", collide)
-    result = batch.convert_batch(items, "標準文書", tmp_path)
+    result = batch.convert_batch(items, tmp_path)
     assert [p.name for p in result.saved] == ["競合 (1).docx"]
     assert (tmp_path / "競合.docx").read_bytes() == b"other-writer"
 
@@ -145,22 +145,36 @@ def test_resume_date_is_set_at_conversion_for_paste_and_four_batch_files(tmp_pat
     import markdown_to_word.resume_template as resume
 
     source = "# 職務経歴書\n\n2026年10月31日現在\n\n氏名：架空 花子\n\n■ 職務要約\n\n本文です。"
-    preview = prepare(source, "職務経歴書", "paste")
+    preview = prepare(source, "paste")
     paths = tuple(tmp_path / f"企業{i}.md" for i in range(4))
     for path in paths:
         path.write_text(source, encoding="utf-8")
-    items = prepare_batch(paths, "職務経歴書")
+    items = prepare_batch(paths)
 
     # Preview may have happened on the previous day; only render reads today.
     monkeypatch.setattr(resume, "_local_today", lambda: date(2026, 11, 15))
     target = tmp_path / "貼り付け.docx"
-    convert(preview, source, "職務経歴書", "paste", target, replace=False)
+    convert(preview, source, "paste", target, replace=False)
     assert [p.text for p in Document(target).paragraphs[:3]] == [
         "職務経歴書", "2026年11月15日現在", "氏名：架空 花子"
     ]
-    result = convert_batch(items, "職務経歴書", tmp_path)
+    result = convert_batch(items, tmp_path)
     assert len(result.saved) == 4 and not result.failures
     for output in result.saved:
         assert [p.text for p in Document(output).paragraphs[:3]] == [
             "職務経歴書", "2026年11月15日現在", "氏名：架空 花子"
         ]
+
+
+def test_single_template_missing_preserves_existing_output(tmp_path, monkeypatch):
+    from markdown_to_word import resume_template
+
+    source = "本文です。"
+    preview = prepare(source, "paste")
+    target = tmp_path / "existing.docx"
+    target.write_bytes(b"original")
+    monkeypatch.setattr(resume_template, "_TEMPLATE_PATH", tmp_path / "missing.docx")
+    with pytest.raises(ConversionError, match="テンプレート"):
+        convert(preview, source, "paste", target, replace=True)
+    assert target.read_bytes() == b"original"
+    assert not list(tmp_path.glob(".mtw-*"))
