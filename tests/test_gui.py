@@ -265,3 +265,26 @@ def test_pdf_tab_preserves_markdown_state_and_shares_busy(tmp_path, monkeypatch)
                     break
                 time.sleep(0.01)
         view.controller.close()
+
+
+def test_windows_application_icon(caplog):
+    import sys
+    from pathlib import Path
+    from markdown_to_word.gui import __main__ as entry
+
+    if sys.platform != "win32":
+        pytest.skip("Windows ICO loading only")
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("GUI display unavailable")
+    root.withdraw()
+    try:
+        assert (Path(entry.__file__).resolve().parents[1] / "assets" / "MarkdownToWord.ico").is_file()
+        entry._set_window_icon(root)
+        assert not any(
+            "Application icon could not be loaded" in record.getMessage()
+            for record in caplog.records
+        )
+    finally:
+        root.destroy()

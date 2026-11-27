@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import ctypes
+import logging
 import os
 import tkinter as tk
+from pathlib import Path
 
 from .view import TkView
+
+logger = logging.getLogger(__name__)
 
 
 def _dpi_awareness() -> None:
@@ -64,10 +68,22 @@ def _fit_to_work_area(root: tk.Tk) -> None:
     root.geometry(f"{width}x{height}+{x}+{y}")
 
 
+def _set_window_icon(root: tk.Tk) -> None:
+    """Set the bundled Windows icon without preventing startup on failure."""
+    if os.name != "nt":
+        return
+    try:
+        icon_path = Path(__file__).resolve().parents[1] / "assets" / "MarkdownToWord.ico"
+        root.iconbitmap(default=str(icon_path))
+    except (tk.TclError, OSError) as exc:
+        logger.warning("Application icon could not be loaded: %s", exc)
+
+
 def main() -> None:
     _dpi_awareness()
     root = tk.Tk()
     root.withdraw()
+    _set_window_icon(root)
     TkView(root)
     _fit_to_work_area(root)
     root.deiconify()

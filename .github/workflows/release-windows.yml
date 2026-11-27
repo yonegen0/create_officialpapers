@@ -1,7 +1,11 @@
 name: Windows ZIP distribution
 on:
   workflow_dispatch:
-  # One distribution build on changes to this workflow, not on every push.
+  # Validate distribution changes before merge and publish only on main.
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-windows.yml'
   push:
     branches: [main]
     paths:
@@ -25,17 +29,20 @@ jobs:
       - name: Validate ZIP content and extraction
         shell: pwsh
         run: |
-          $zip = 'release/MarkdownToWord-0.2.1-win-x64.zip'
+          $zip = 'release/MarkdownToWord-0.2.2-win-x64.zip'
           if (!(Test-Path $zip)) { throw 'ZIP missing' }
           $folder = Join-Path $env:RUNNER_TEMP 'markdown-to-word-unpacked'
           Expand-Archive -Path $zip -DestinationPath $folder -Force
           if (!(Test-Path (Join-Path $folder 'MarkdownToWord/MarkdownToWord.exe'))) { throw 'EXE missing after unzip' }
           if (!(Test-Path (Join-Path $folder 'MarkdownToWord/_internal'))) { throw 'onedir dependencies missing' }
+          $ico = Join-Path $folder 'MarkdownToWord/_internal/markdown_to_word/assets/MarkdownToWord.ico'
+          if (!(Test-Path $ico)) { throw 'Application icon missing from ZIP' }
+          if ((Get-FileHash $ico).Hash -ne (Get-FileHash 'markdown_to_word/assets/MarkdownToWord.ico').Hash) { throw 'Packaged icon differs from source' }
       - name: Upload downloadable ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: MarkdownToWord-0.2.1-win-x64
-          path: release/MarkdownToWord-0.2.1-win-x64.zip
+          name: MarkdownToWord-0.2.2-win-x64
+          path: release/MarkdownToWord-0.2.2-win-x64.zip
           if-no-files-found: error
           retention-days: 30
       - name: Publish new release (no overwrite)
@@ -45,11 +52,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $repo = '${{ github.repository }}'
-          $tag = 'v0.2.1'
+          $tag = 'v0.2.2'
           gh release view $tag --repo $repo *> $null
           if ($LASTEXITCODE -eq 0) {
             Write-Host "Release $tag already exists; skipping."
           } else {
-            gh release create $tag 'release/MarkdownToWord-0.2.1-win-x64.zip' --repo $repo --target '${{ github.sha }}' --title 'MarkdownToWord 0.2.1 (Windows x64)' --notes 'Windows x64 onedir ZIP. Windows 11実機でのGUI動作は未検証です。'
+            gh release create $tag 'release/MarkdownToWord-0.2.2-win-x64.zip' --repo $repo --target '${{ github.sha }}' --title 'MarkdownToWord 0.2.2 (Windows x64)' --notes 'Windows x64 onedir ZIP. Windows 11実機でのGUI動作は未検証です。'
             if ($LASTEXITCODE -ne 0) { throw 'Release publishing failed.' }
           }
