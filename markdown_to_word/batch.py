@@ -33,12 +33,12 @@ class BatchResult:
 Progress = Callable[[int, int, str, int, int], None]
 
 
-def prepare_batch(paths: tuple[Path, ...], style: str, progress: Progress | None = None) -> tuple[BatchItem, ...]:
+def prepare_batch(paths: tuple[Path, ...], progress: Progress | None = None) -> tuple[BatchItem, ...]:
     results: list[BatchItem] = []
     for path in paths:
         try:
             source = read_file(path)
-            results.append(BatchItem(path, source, prepare(source, style, "file")))
+            results.append(BatchItem(path, source, prepare(source, "file")))
         except (ConversionError, OSError) as exc:
             results.append(BatchItem(path, error=str(exc)))
         if progress:
@@ -48,13 +48,12 @@ def prepare_batch(paths: tuple[Path, ...], style: str, progress: Progress | None
     return tuple(results)
 
 
-def _preflight(folder: Path, style: str) -> None:
+def _preflight(folder: Path) -> None:
     if not folder.is_dir():
         raise ConversionError("保存先フォルダーが存在しません。")
-    if style == "職務経歴書":
-        # Check the shared template before committing any output.
-        from .resume_template import _load_template
-        _load_template()
+    # Check the shared template before committing any output.
+    from .resume_template import _load_template
+    _load_template()
     try:
         with tempfile.TemporaryFile(dir=folder):
             pass
@@ -76,14 +75,11 @@ def _available_path(folder: Path, stem: str, reserved: set[str]) -> Path:
 
 def convert_batch(
     items: tuple[BatchItem, ...],
-    style: str,
     folder: Path,
     progress: Progress | None = None,
 ) -> BatchResult:
     folder = Path(folder)
-    _preflight(folder, style)
-    if any(item.preview is not None and item.preview.style != style for item in items):
-        raise ConversionError("文書スタイルが変更されました。事前確認をやり直してください。")
+    _preflight(folder)
 
     saved: list[Path] = []
     failures: list[tuple[Path, str]] = []
@@ -102,7 +98,7 @@ def convert_batch(
             for attempt in range(3):
                 target = _available_path(folder, item.path.stem, reserved)
                 try:
-                    output = convert(item.preview, current, style, "file", target, replace=False)
+                    output = convert(item.preview, current, "file", target, replace=False)
                     saved.append(output)
                     reserved.add(output.name.casefold())
                     break

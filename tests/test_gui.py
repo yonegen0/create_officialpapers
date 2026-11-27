@@ -17,6 +17,10 @@ def _window():
 def test_input_modes_preserve_text_and_file_selection(tmp_path, monkeypatch):
     root, view = _window()
     try:
+        assert not hasattr(view, "style")
+        assert not hasattr(view, "style_combo")
+        assert len(view.setting_groups) == 2
+        assert view.output_name.get().startswith("職務経歴書_")
         source = tmp_path / "架空.md"
         source.write_text("# ファイル", encoding="utf-8")
         from markdown_to_word.gui import controller
@@ -37,8 +41,6 @@ def test_input_modes_preserve_text_and_file_selection(tmp_path, monkeypatch):
 def test_gui_preview_generate_busy_and_success(tmp_path):
     root, view = _window()
     try:
-        # This test covers GUI save flow, independent of the separate resume asset.
-        view.style.set("標準文書")
         view.input_mode.set("paste")
         view.input_text.insert("1.0", "# 見出し\n\n本文です。")
         view.output_name.set("出力.docx")
@@ -130,7 +132,8 @@ def test_busy_disables_editing_and_output_actions(tmp_path):
         view.set_busy(False)
         assert view.progress.winfo_manager() == ""
         assert str(view.input_text.cget("state")) == "normal"
-        assert str(view.style_combo.cget("state")) == "readonly"
+        assert not hasattr(view, "style_combo")
+        assert str(view.name_entry.cget("state")) == "normal"
         assert str(view.open_button.cget("state")) == "normal"
     finally:
         view.controller.close()
@@ -144,7 +147,6 @@ def test_gui_batch_selection_preview_generation_and_paste_compatibility(tmp_path
         paths = [tmp_path / f"企業{i}.md" for i in range(3)]
         for index, path in enumerate(paths):
             path.write_text(f"# 会社{index}\n\n本文", encoding="utf-8")
-        view.style.set("標準文書")
         files = tuple(str(path) for path in paths)
         monkeypatch.setattr(controller.filedialog, "askopenfilenames", lambda **kw: files)
         view.controller.choose_file()

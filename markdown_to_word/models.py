@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 
 
@@ -35,13 +35,10 @@ class ParsedDocument:
     headings: int = 0
     tables: int = 0
     list_items: int = 0
-    # Explicitly preserve the selected renderer without breaking positional callers.
-    style: str = "標準文書"
 
 
 @dataclass(frozen=True)
 class Preview:
     document: ParsedDocument
     fingerprint: str
-    style: str
     input_mode: str
